@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- | Constructor functions for 'Gdmi.Representation.Command' values.
 -- 
 -- Please consult the cited GDB documentation for the semantics of the individual commands.
@@ -366,26 +367,29 @@ traceModeOptions (PCOutsideRange x y) = [opt x, opt y]
 traceModeOptions (Line x) = [opt x]
 
 data Target -- {{{2
-  = Exec FilePath  -- ^ \"exec\"
-  | Core FilePath  -- ^ \"core\"
-  | Remote Medium  -- ^ \"remote\"
-  | Sim [String]   -- ^ \"sim\"
-  | Nrom           -- ^ \"nrom\"
+  = Exec FilePath          -- ^ \"exec\"
+  | Core FilePath          -- ^ \"core\"
+  | Remote Medium          -- ^ \"remote\"
+  | ExtendedRemote Medium  -- ^ \"extended-remote\"
+  | Sim [String]           -- ^ \"sim\"
+  | Nrom                   -- ^ \"nrom\"
 
 instance GdbShow Target where
-  gdbShow (Exec _) = "exec" 
-  gdbShow (Core _) = "core"
-  gdbShow (Remote _) = "remote" 
-  gdbShow (Sim _) = "sim"
-  gdbShow Nrom = "nrom"
+  gdbShow (Exec _)           = "exec"
+  gdbShow (Core _)           = "core"
+  gdbShow (Remote _)         = "remote"
+  gdbShow (ExtendedRemote _) = "extended-remote"
+  gdbShow (Sim _)            = "sim"
+  gdbShow Nrom               = "nrom"
 
 targetOptions :: Target -> [Option]
-targetOptions (Exec x) = [opt x] 
-targetOptions (Core x) = [opt x] 
-targetOptions (Remote x) = [opt x]
-targetOptions (Sim xs) = map opt xs
-targetOptions Nrom = []
-  
+targetOptions (Exec x)           = [optRaw x]
+targetOptions (Core x)           = [optRaw x]
+targetOptions (Remote x)         = [optRaw x]
+targetOptions (ExtendedRemote x) = [optRaw x]
+targetOptions (Sim xs)           = map optRaw xs
+targetOptions Nrom               = []
+
 data Medium -- {{{2
   = SerialDevice String  -- ^ just the given device
   | TcpHost String Int   -- ^ \"tcp:%s:%d\" host port
@@ -401,12 +405,14 @@ instance GdbShow Medium where
 data Interpreter -- {{{2
   = Console -- ^ \"console\"
   | MI      -- ^ \"mi\"
+  | MI3     -- ^ \"mi3\"
   | MI2     -- ^ \"mi2\"
   | MI1     -- ^ \"mi1\"
 
 instance GdbShow Interpreter where
   gdbShow Console = "console"
   gdbShow MI = "mi"
+  gdbShow MI3 = "mi3"
   gdbShow MI2 = "mi2"
   gdbShow MI1 = "mi1"
    
@@ -440,10 +446,10 @@ break_condition :: Int -> String -> Command -- {{{3
 break_condition number expr = cmd "break-condition" $ opt number : opt expr : []
 
 break_delete :: [Int] -> Command -- {{{3
-break_delete numbers = cmd "break-delete" $ map optr numbers
+break_delete numbers = cmd "break-delete" $ map optShow numbers
 
 break_disable :: [Int] -> Command -- {{{3
-break_disable numbers = cmd "break-disable" $ map opt numbers
+break_disable numbers = cmd "break-disable" $ map optShow numbers
 
 break_enable :: [Int] -> Command -- {{{3
 break_enable numbers = cmd "break-enable" $ map opt numbers
@@ -463,7 +469,7 @@ break_insert temporary hardware pending disabled tracepoint condition ignoreCoun
     condition'   = valueOpt "-c" condition
     ignoreCount' = valueOpt "-i" ignoreCount
     threadId'    = valueOpt "-p" threadId
-    
+
 break_list :: Command -- {{{3
 break_list = cmd "break-list" []
 
@@ -471,7 +477,7 @@ break_passcount :: Int -> Int -> Command -- {{{3
 break_passcount tracepointNumber passcount = cmd "break-passcount" $ map opt [tracepointNumber, passcount]
 
 break_watch :: Bool -> Command -- {{{3
-break_watch access =  cmd "break-watch" [opt (if access then "-a" else "-r")]
+break_watch access =  cmd "break-watch" [opt (if access then ("-a" :: String) else ("-r" :: String))]
 
 -- program context {{{2
 exec_arguments :: [String] -> Command -- {{{3
@@ -504,23 +510,26 @@ ada_task_info :: Maybe Int -> Command -- {{{3
 ada_task_info taskId = cmd "ada-task-info" $ fmap opt taskId ?: []
 
 -- program execution {{{2
-exec_continue :: Bool -> Either Bool Int -> Command -- {{{3
-exec_continue reverse x = cmd "exec-continue" $ reverse' ?: x' ?: []
+exec_continue :: Command -- {{{3
+exec_continue = cmd "exec-continue" []
+
+exec_continue_opts :: Bool -> Either Bool Int -> Command -- {{{3
+exec_continue_opts reverse x = cmd "exec-continue" $ reverse' ?: x' ?: []
   where
     reverse'     = flagOpt "--reverse" reverse
     x' = case x of
       Left all -> flagOpt "--all" all
-      Right threadGroup -> Just $ opt' "--threadGroup" threadGroup
+      Right threadGroup -> Just $ optsRaw "--threadGroup" threadGroup
 
 exec_finish :: Bool -> Command -- {{{3
 exec_finish reverse = cmd "exec-finish" $ flagOpt "--reverse" reverse ?: []
 
 exec_interrupt :: Either Bool Int -> Command -- {{{3
-exec_interrupt x = cmd "exec-interrupt" $ x' ?: [] 
+exec_interrupt x = cmd "exec-interrupt" $ x' ?: []
   where
     x' = case x of
-      Left all -> flagOpt "-all" all
-      Right threadGroup -> Just $ opt' "--threadGroup" threadGroup
+      Left all -> flagOpt "--all" all
+      Right threadGroup -> Just $ opts "--threadGroup" threadGroup
 
 exec_jump :: Location -> Command -- {{{3
 exec_jump location = cmd "exec-jump" [opt location]
@@ -534,12 +543,16 @@ exec_next_instruction reverse = cmd "exec-next-instruction" $ flagOpt "--reverse
 exec_return :: Command -- {{{3
 exec_return = cmd "exec-return" []
 
-exec_run :: Either Bool Int -> Command -- {{{3
-exec_run x = cmd "exec-run" $ x' ?: []
+exec_run :: Command -- {{{3
+exec_run = cmd "exec-run" []
+
+-- missing --start
+exec_run_opts :: Either Bool Int -> Command -- {{{3
+exec_run_opts x = cmd "exec-run" $ x' ?: []
   where
     x' = case x of
-      Left all -> flagOpt "-all" all
-      Right threadGroup -> Just $ opt' "--threadGroup" threadGroup
+      Left all -> flagOpt "--all" all
+      Right threadGroup -> Just $ optsRaw "--threadGroup" threadGroup
 
 exec_step :: Command -- {{{3
 exec_step = cmd "exec-step" []
@@ -645,8 +658,8 @@ data_disassemble :: Either (String, String) (String, Int, Maybe Int) -> Disassem
 data_disassemble x mode = MICommand Nothing "data-disassemble" options [QuotedString . gdbShow $ mode]
   where
     options = case x of
-      Left (start, end) -> opt' "-s" start : opt' "-e" end : []
-      Right (filename, linenum, lines) -> opt' "-f" filename : opt' "-l" linenum : valueOpt "-n" lines ?: []
+      Left (start, end) -> opt' ("-s" :: String) start : opt' ("-e" :: String) end : []
+      Right (filename, linenum, lines) -> opt' ("-f" :: String) filename : opt' ("-l" :: String) linenum : valueOpt ("-n" :: String) lines ?: []
 
 data_evaluate_expression :: String -> Command -- {{{3
 data_evaluate_expression expr = cmd "data-evaluate-expression" [opt expr]
@@ -718,7 +731,7 @@ target_attach :: Either Int FilePath -> Command -- {{{3
 target_attach x = cmd "target-attach" $ x' : []
   where
     x' = case x of
-      Left pidOrGid -> opt pidOrGid
+      Left pidOrGid -> optShow pidOrGid
       Right file -> opt file
 
 target_detach :: Maybe Int -> Command -- {{{3
@@ -731,7 +744,7 @@ target_download :: Command -- {{{3
 target_download = cmd "target-download" []
 
 target_select :: Target -> Command -- {{{3
-target_select target = cmd "target-select" $ opt target : targetOptions target
+target_select target = cmd "target-select" $ optRaw target : targetOptions target
 
 -- file transfer commands {{{2
 target_file_put :: FilePath -> FilePath -> Command -- {{{3
@@ -781,7 +794,7 @@ inferior_tty_gdbShow :: Command -- {{{3
 inferior_tty_gdbShow = cmd "inferior-tty-gdbShow" []
 
 enable_timings :: Bool -> Command -- {{{3
-enable_timings flag = cmd "enable-timings" $ opt (if flag then "yes" else "no") : []
+enable_timings flag = cmd "enable-timings" $ opt (if flag then ("yes" :: String) else ("no" :: String)) : []
 
 -- utils {{{1
 cmd :: String -> [Option] -> Command -- {{{2
@@ -790,15 +803,24 @@ cmd operation options = MICommand Nothing operation options []
 opt :: GdbShow a => a -> Option -- {{{2
 opt parameter = Option (QuotedString . gdbShow $ parameter) Nothing
 
-optr :: Show a => a -> Option -- {{{2
-optr parameter = Option (RawString . show $ parameter) Nothing
+optRaw :: GdbShow a => a -> Option -- {{{2
+optRaw parameter = Option (RawString . gdbShow $ parameter) Nothing
+
+optShow :: Show a => a -> Option -- {{{2
+optShow parameter = Option (RawString . show $ parameter) Nothing
 
 opt' :: (GdbShow a, GdbShow b) => a -> b -> Option -- {{{2
 opt' name value = Option (QuotedString . gdbShow $ name) (Just (QuotedString . gdbShow $ value))
 
+opts :: GdbShow a => String -> a -> Option -- {{{2
+opts name value = Option (QuotedString . gdbShow $ name) (Just (QuotedString . gdbShow $ value))
+
+optsRaw :: GdbShow a => String -> a -> Option -- {{{2
+optsRaw name value = Option (RawString . gdbShow $ name) (Just (RawString . gdbShow $ value))
+
 flagOpt :: String -> Bool -> Maybe Option -- {{{2
 flagOpt _ False = Nothing
-flagOpt flag True = Just (opt flag)
+flagOpt flag True = Just (optRaw flag)
 
 valueOpt :: GdbShow a => String -> Maybe a -> Maybe Option -- {{{2
 valueOpt _ Nothing = Nothing
