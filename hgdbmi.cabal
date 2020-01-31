@@ -1,6 +1,6 @@
 name:           hgdbmi
 category:       Development
-version:        0.2
+version:        0.3
 license:        BSD3
 cabal-version:  >= 1.14
 license-file:   LICENSE
@@ -23,7 +23,7 @@ Description:
   This module is tested with GDB version 7.4.
 
 build-type:     Simple
-tested-with:    GHC == 7.4.2
+tested-with:    GHC == 8.8.1
 
 source-repository head
   type: git
@@ -38,9 +38,10 @@ library
   build-depends:
     base        >= 4 && < 5,
     parsec      == 3.1.*,
-    process     == 1.1.*,
-    unix        == 2.6.*,
-    stm         == 2.3.*
+    process     == 1.6.*,
+    unix        == 2.7.*,
+    directory   == 1.3.*,
+    stm         == 2.5.*
 
   exposed-modules:
     Gdbmi.IO
@@ -62,10 +63,10 @@ test-suite pure
   build-depends:
     hgdbmi,
     base                 >= 4 && < 5,
-    HUnit                == 1.2.*,
-    test-framework       == 0.6.*,
-    test-framework-hunit == 0.2.*,
-    template-haskell 
+    HUnit                == 1.6.*,
+    test-framework       == 0.8.*,
+    test-framework-hunit == 0.3.*,
+    template-haskell
 
 
 test-suite io
@@ -78,7 +79,7 @@ test-suite io
   build-depends:
     hgdbmi,
     base                 >= 4 && < 5,
-    directory            == 1.2.*,
-    process              == 1.1.*,
-    temporary            == 1.1.*,
+    directory            == 1.3.*,
+    process              == 1.6.*,
+    temporary            == 1.3.*,
     template-haskell 
