@@ -11,7 +11,7 @@ module Gdbmi.IO
 (
     Context, Config(..), Callback(..)
   , default_config
-  , setup, shutdown, send_command
+  , setup, shutdown, interrupt, kill, send_command
 ) where
 
 -- imports {{{1
@@ -26,7 +26,9 @@ import Data.List (partition)
 import Prelude hiding (catch, interact)
 import System.IO (Handle, hSetBuffering, BufferMode(LineBuffering), hPutStr, hWaitForInput, hGetLine, IOMode(WriteMode), stdout, openFile, hFlush, hClose)
 import System.Posix.IO (fdToHandle, createPipe)
-import System.Process (ProcessHandle, runProcess, waitForProcess)
+import System.Process (ProcessHandle, runProcess, waitForProcess, terminateProcess)
+import System.Process.Internals (withProcessHandle, ProcessHandle__(..))
+import System.Posix.Signals (signalProcess, sigINT)
 
 import qualified Gdbmi.Commands       as C
 import qualified Gdbmi.Representation as R
@@ -114,20 +116,45 @@ setup config callback = do
     h2 <- fdToHandle f2
     return (h1, h2)
 
+kill ctx = do
+  terminateProcess $ ctxProcess ctx
+  mapM_ (killThread . ($ctx)) [ctxCommandThread, ctxOutputThread]
+  case ctxLog ctx of
+    Nothing -> return ()
+    Just handle ->
+      if handle /= stdout
+        then hClose handle
+        else return ()
+
+-- | returns Just pid or Nothing if process has already exited
+getPid ph = withProcessHandle ph go
+  where
+    go ph_ = case ph_ of
+               OpenHandle x   -> return $ Just x
+               ClosedHandle _ -> return Nothing
+
 shutdown :: Context -> IO () -- {{{1
 -- | Shut down the GDB instance and all resources associated with the 'Context'.
 shutdown ctx = do
   mapM_ (killThread . ($ctx)) [ctxCommandThread, ctxOutputThread]
   replicateM_ 2 (takeMVar (ctxFinished ctx))
+  interrupt ctx
   writeCommand ctx C.gdb_exit 0
   _ <- waitForProcess (ctxProcess ctx)
   putMVar (ctxFinished ctx) ()
   case ctxLog ctx of
     Nothing -> return ()
-    Just handle -> 
+    Just handle ->
       if handle /= stdout
         then hClose handle
         else return ()
+
+-- | Send SIGINT to GDB process
+interrupt ctx = do
+  pid <- getPid (ctxProcess ctx)
+  case pid of
+    Nothing -> return ()
+    Just p  -> signalProcess sigINT p
 
 send_command :: Context -> R.Command -> IO R.Response -- {{{1
 -- | Send a GDB command and wait for the response.
@@ -172,7 +199,7 @@ handleOutput ctx = handleKill ctx $ do
           if (R.get_token output /= Just (jobToken job))
             then error $ "token missmatch! " ++ show (R.get_token output) ++ " vs. " ++ show (jobToken job)
             else atomically $ putTMVar (jobResponse job) response
-  handleOutput ctx  
+  handleOutput ctx
 
 callBack :: Context -> R.Output -> IO ()
 callBack ctx output = forkIO go >> return ()
