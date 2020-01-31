@@ -56,6 +56,7 @@ import Control.Applicative ((<$>), (<*>), (<*))
 import Data.Char (isAscii)
 import Data.List (find)
 import Data.Maybe (isNothing)
+import Data.Foldable (asum)
 import Text.ParserCombinators.Parsec hiding (token)
 
 -- input {{{1
@@ -151,17 +152,24 @@ data ResultClass -- {{{3
   | RCError
   | RCExit
   deriving (Show, Eq)
- 
+
 data AsyncClass -- {{{3
   = ACStop
   | ACThreadGroupAdded
   | ACThreadGroupStarted
   | ACThreadCreated
+  | ACThreadSelected
   | ACRunning
   | ACLibraryLoaded
   | ACThreadExited
   | ACThreadGroupExited
+  | ACBreakpointCreated
+  | ACBreakpointDeleted
   | ACBreakpointModified
+  | ACParamChanged
+  | ACMemoryChanged
+  | ACRecordStarted
+  | ACRecordStopped
   deriving (Show, Eq)
 
 data Result -- {{{3
@@ -217,7 +225,7 @@ type CString = String -- {{{3
 parse_output :: String -> Output -- {{{3
 -- | Turn an GDB output string to an 'Output' value.
 parse_output str = case parse p_output "gdb" str of
-  Left pe -> error $ "parse failed: " ++ show pe
+  Left pe -> error $ "parse failed: " ++ show pe ++ " input was: " ++ str
   Right o -> o
 
 p_output :: Parser Output -- {{{3
@@ -270,16 +278,24 @@ p_resultClass =
   <|>     (string "exit"      >> return RCExit)
 
 p_asyncClass :: Parser AsyncClass -- {{{3
-p_asyncClass =
-      try (string "stopped"              >> return ACStop)
-  <|> try (string "thread-group-added"   >> return ACThreadGroupAdded)
-  <|> try (string "thread-group-started" >> return ACThreadGroupStarted)
-  <|> try (string "thread-created"       >> return ACThreadCreated)
-  <|> try (string "running"              >> return ACRunning)
-  <|> try (string "thread-exited"        >> return ACThreadExited)
-  <|> try (string "thread-group-exited"  >> return ACThreadGroupExited)
-  <|> try (string "breakpoint-modified"  >> return ACBreakpointModified)
-  <|>     (string "library-loaded"       >> return ACLibraryLoaded)
+p_asyncClass = asum $ map try $ [
+    string "breakpoint-created"   >> return ACBreakpointCreated
+  , string "breakpoint-deleted"   >> return ACBreakpointDeleted
+  , string "breakpoint-modified"  >> return ACBreakpointModified
+  , string "cmd-param-changed"    >> return ACParamChanged
+  , string "running"              >> return ACRunning
+  , string "record-started"       >> return ACRecordStarted
+  , string "record-stopped"       >> return ACRecordStopped
+  , string "stopped"              >> return ACStop
+  , string "thread-group-added"   >> return ACThreadGroupAdded
+  , string "thread-group-started" >> return ACThreadGroupStarted
+  , string "thread-created"       >> return ACThreadCreated
+  , string "thread-selected"      >> return ACThreadSelected
+  , string "thread-exited"        >> return ACThreadExited
+  , string "thread-group-exited"  >> return ACThreadGroupExited
+  , string "memory-changed"       >> return ACMemoryChanged
+  , string "library-loaded"       >> return ACLibraryLoaded
+  ]
 
 p_result :: Parser Result -- {{{3
 p_result =
@@ -357,6 +373,8 @@ p_cString = between (char '"') (char '"') (many p_cchar)
       case c of
         '\\' -> return '\\'
         'n' -> return '\n'
+        'r' -> return '\r'
+        't' -> return '\t'
         '"' -> return '"'
         _ -> fail $ "unknown backslash escape: " ++ show c
 
