@@ -1,6 +1,8 @@
 -- | Semantical data structures and conversion functions for GDB\/MI output.
 --  
--- While working with 'Gdbmi.Representation.Response' and 'Gdbmi.Representation.Notification' is always possible in general, handling the generic 'Gdbmi.Representation.Result' lists is cumbersome. This module provides convenient data types instead to facilitate pattern matching etc..
+-- While working with 'Gdbmi.Representation.Response' and 'Gdbmi.Representation.Notification' is always possible in general,
+-- handling the generic 'Gdbmi.Representation.Result' lists is cumbersome.
+-- This module provides convenient data types instead to facilitate pattern matching etc..
 --  
 -- This module is incomplete, as we only implemented what we needed up to now.
 module Gdbmi.Semantics
@@ -12,6 +14,7 @@ module Gdbmi.Semantics
   response_data_evaluate_expression,
   response_exec_return,
   response_stack_list_frames,
+  response_read_memory_bytes,
   response_error,
   notification_stopped,
   -- * Types
@@ -22,7 +25,7 @@ module Gdbmi.Semantics
 ) where
 
 -- import {{{1
-import Control.Applicative ((<$>), (<*>))
+import Control.Applicative ((<$>), (<*>), (<|>))
 import Control.Monad (guard, msum, (<=<))
 import Data.List (find)
 
@@ -87,6 +90,7 @@ data StopReason -- {{{2
     }
   | EndSteppingRange
   | FunctionFinished
+  | NoReason -- after attach we get stopped with missing reason
 
   deriving Show
 
@@ -139,11 +143,11 @@ responseFrame (Result variable value) = do
 responseStopped :: [Result] -> Maybe Stopped -- {{{2
 responseStopped rs = do
   Stopped
-    <$> responseStopReason rs
+    <$> (responseStopReason rs <|> pure NoReason)
     <*> msum (map responseFrame rs)
     <*> get rs tryRead "thread-id"
     <*> get rs Just    "stopped-threads"
-    <*> get rs tryRead "core"
+    <*> (get rs tryRead "core" <|> pure 0)
 
 responseStopReason :: [Result] -> Maybe StopReason  -- {{{2
 responseStopReason rs = do
@@ -165,7 +169,7 @@ responseArgs (Result variable value) = do
     EmptyList -> Just []
     ValueList is -> do
       mapM ((responseArg . tupleResults) <=< asTuple) is
-    _ -> Nothing 
+    _ -> Nothing
 
 responseArg :: [Result] -> Maybe Arg -- {{{2
 responseArg rs = do
@@ -195,6 +199,32 @@ response_exec_return :: [Result] -> Maybe Frame -- {{{2
 -- | Convert the result list of a 'Gdbmi.Commands.exec_return' command response.
 response_exec_return [item] = responseFrame item
 response_exec_return _      = Nothing
+
+-- | Convert the result of a `Gdmi.data_read_memory_bytes` to number
+response_read_memory_bytes :: (Num a) => [Result] -> Maybe a
+response_read_memory_bytes [(Result variable value)] = do
+  guard (variable == "memory")
+  l <- asList value
+  t <- case l of
+    ValueList is -> do
+      mapM ((hexContents . tupleResults) <=< asTuple) is
+    _ -> Nothing
+
+  guard (t /= mempty)
+  fromInteger <$> headMay t
+response_read_memory_bytes _ = Nothing
+
+hexContents :: [Result] -> Maybe Integer
+hexContents rs = get rs (tryRead . ("0x"++) . toBigEndian) "contents"
+
+toBigEndian a = go $ reverse a
+  where go (x:y:xs) = y:x:(go xs)
+        go [] = ""
+
+headMay :: [a] -> Maybe a
+headMay (x:xs) = Just x
+headMay [] = Nothing
+
 
 response_error :: [Result] -> Maybe String -- {{{2
 -- | Convert the result list of a 'Gdbmi.Representation.Response' with 'Gdbmi.Representation.ResultClass' 'Gdbmi.Representation.RCError'.
