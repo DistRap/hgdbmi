@@ -3,7 +3,8 @@ hgdbmi
 
 Haskell implementation of a GDB Machine Interface client.
 
-This is fork of [hgdbmi v0.1](http://neugierig.org/software/darcs/browse/?r=hgdbmi;a=summary) and I am planing to merge back.
+This is fork of [hgdbmi v0.2](https://github.com/copton/hgdbmi)
+which is fork of [hgdbmi v0.1](http://neugierig.org/software/darcs/browse/?r=hgdbmi;a=summary).
 
 Links
 =====
