@@ -99,14 +99,14 @@ test = do
   let loc       = C.file_function_location "example.c" "print"
   bp'          <- cmd R.RCDone $ C.break_insert False False False False False Nothing Nothing Nothing loc
   let (Just bp) = S.response_break_insert bp'
-  _            <- cmd R.RCRunning $ C.exec_run (Left True)
+  _            <- cmd R.RCRunning $ C.exec_run
   forM_ [(0::Int)..10] (\counter -> do
       [stopped]      <- takeMVar mv 
       assert "breakpoint number" ((S.bkptHitNumber . S.stoppedReason) stopped) (S.bkptNumber bp)
       value'          <- cmd R.RCDone $ C.data_evaluate_expression "i"
       let (Just value) = S.response_data_evaluate_expression value'
       assert "value of i" value (show counter)
-      _               <- cmd R.RCRunning $ C.exec_continue False (Left True)
+      _               <- cmd R.RCRunning $ C.exec_continue
       return ()
     )
   G.shutdown ctx
