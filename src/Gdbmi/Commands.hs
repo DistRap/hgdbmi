@@ -761,7 +761,7 @@ gdb_exit :: Command -- {{{3
 gdb_exit = cmd "gdb-exit" []
 
 gdb_set :: String -> Command -- {{{3
-gdb_set expr = cmd "gdb-set" $ opt expr : []
+gdb_set expr = cmd "gdb-set" $ optRaw expr : []
 
 gdb_gdbShow :: String -> Command -- {{{3
 gdb_gdbShow name = cmd "gdb-gdbShow" $ opt name : []
