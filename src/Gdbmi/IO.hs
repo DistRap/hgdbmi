@@ -174,7 +174,7 @@ send_command ctx command = checkShutdown >> sendCommand >>= receiveResponse
       response <- newEmptyTMVar
       writeTChan (ctxJobs ctx) $ Job command response token
       return response
-    
+
     receiveResponse = atomically . takeTMVar
 
 -- implementation {{{1
@@ -235,7 +235,7 @@ handleKill ctx action = catchJust select action handler
     handler _ = putMVar (ctxFinished ctx) ()
 
 writeCommand :: Context -> R.Command -> R.Token -> IO () -- {{{2
-writeCommand ctx cmd token = 
+writeCommand ctx cmd token =
   let cmdstr = (R.render_command . C.set_token token) cmd in
   do
     debugLog ctx True cmdstr
