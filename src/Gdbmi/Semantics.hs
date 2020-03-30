@@ -13,6 +13,7 @@ module Gdbmi.Semantics
   response_break_insert,
   response_data_evaluate_expression,
   response_exec_return,
+  response_stack_info_frame,
   response_stack_list_frames,
   response_read_memory_bytes,
   response_error,
@@ -182,6 +183,11 @@ response_stack_list_frames :: [Result] -> Maybe Stack -- {{{2
 -- | Convert the result list of a 'Gdbmi.Commands.stack_list_frames' command response.
 response_stack_list_frames [item] = responseStack item
 response_stack_list_frames _      = Nothing
+
+response_stack_info_frame :: [Result] -> Maybe Frame -- {{{2
+-- | Convert the result list of a 'Gdbmi.Commands.stack_info_frame' command response.
+response_stack_info_frame [item] = responseFrame item
+response_stack_info_frame _      = Nothing
 
 response_break_insert :: [Result] -> Maybe Breakpoint -- {{{2
 -- | Convert the result list of a 'Gdbmi.Commands.break_insert' command response.
