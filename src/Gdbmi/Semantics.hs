@@ -70,9 +70,9 @@ data Frame = Frame { -- {{{2
   , frameAddr     :: String
   , frameFunc     :: String
   , frameArgs     :: Maybe [Arg]
-  , frameFile     :: String
+  , frameFile     :: Maybe String
   , frameFullname :: Maybe String
-  , frameLine     :: Int
+  , frameLine     :: Maybe Int
   } deriving Show
 
 data Stopped = Stopped { -- {{{2
@@ -137,9 +137,9 @@ responseFrame (Result variable value) = do
     <*>       get rs Just    "addr"
     <*>       get rs Just    "func"
     <*> Just (msum (map responseArgs rs))
-    <*>       get rs Just   "file"
+    <*> Just (get rs Just   "file")
     <*> Just (get rs Just   "fullname")
-    <*>       get rs tryRead "line"
+    <*> Just (get rs tryRead "line")
 
 responseStopped :: [Result] -> Maybe Stopped -- {{{2
 responseStopped rs = do
