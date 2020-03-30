@@ -170,6 +170,7 @@ data AsyncClass -- {{{3
   | ACMemoryChanged
   | ACRecordStarted
   | ACRecordStopped
+  | ACDownload
   deriving (Show, Eq)
 
 data Result -- {{{3
@@ -249,9 +250,9 @@ p_outOfBandRecord =
 
 p_asyncRecord :: Parser AsyncRecord -- {{{3
 p_asyncRecord =
-      (p_execAsyncOutput   >>= return . ARExecAsyncOutput)
-  <|> (p_statusAsyncOutput >>= return . ARStatusAsyncOutput)
-  <|> (p_notifyAsyncOutput >>= return . ARNotifyAsyncOutput)
+      try (p_execAsyncOutput   >>= return . ARExecAsyncOutput)
+  <|> try (p_statusAsyncOutput >>= return . ARStatusAsyncOutput)
+  <|>     (p_notifyAsyncOutput >>= return . ARNotifyAsyncOutput)
 
 p_execAsyncOutput :: Parser ExecAsyncOutput -- {{{3
 p_execAsyncOutput =
@@ -295,11 +296,15 @@ p_asyncClass = asum $ map try $ [
   , string "thread-group-exited"  >> return ACThreadGroupExited
   , string "memory-changed"       >> return ACMemoryChanged
   , string "library-loaded"       >> return ACLibraryLoaded
+  , string "download"             >> return ACDownload
   ]
 
 p_result :: Parser Result -- {{{3
 p_result =
-  Result <$> p_variable <* char '=' <*> p_value
+      Result <$> p_variable <* char '=' <*> p_value
+  <|> Result <$> pure "tuple" <*> p_value
+  -- in case of download we have
+  -- "7+download,{section=\".isr_vector\",section-size=\"472\",total-size=\"311082\"}"
 
 p_variable :: Parser Variable -- {{{3
 p_variable = many1 (letter <|> digit <|> oneOf "_-")
