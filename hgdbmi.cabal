@@ -42,6 +42,7 @@ library
     , unix
     , directory
     , stm
+    , network
 
   exposed-modules:
     Gdbmi.IO

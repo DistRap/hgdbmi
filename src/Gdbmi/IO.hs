@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 -- | Control execution of a GDB instance, send commands and receive results, notifications and stream information.
 --
 -- Due to <http://sourceware.org/bugzilla/show_bug.cgi?id=8759> the first command issued should be to set the output terminal for GDB to \/dev\/null. Unfortunatelly, there is no MI command for this, so we have to resort to the CLI command \"tty\". For example:
@@ -20,15 +21,16 @@ import Control.Concurrent (forkIO, killThread, ThreadId, MVar, newEmptyMVar, try
 import Control.Concurrent.STM (TVar, TChan, TMVar, newEmptyTMVar, newTVarIO, newTChanIO, atomically, takeTMVar, readTVar, writeTVar, writeTChan, readTChan, putTMVar)
 import Control.Exception (catchJust)
 import Control.Exception.Base (AsyncException(ThreadKilled))
-import Control.Monad (replicateM_, when)
+import Control.Monad (replicateM_, when, void)
 import Control.Monad.Fix (mfix)
 import Data.List (partition)
 import Prelude hiding (catch, interact)
-import System.IO (Handle, hSetBuffering, BufferMode(LineBuffering), hPutStr, hWaitForInput, hGetLine, IOMode(WriteMode), stdout, openFile, hFlush, hClose)
+import System.IO (Handle, hSetBuffering, BufferMode(LineBuffering), hPutStr, hWaitForInput, hGetLine, IOMode(WriteMode), stdout, openFile, hFlush, hClose, IOMode(..))
 import System.Posix.IO (fdToHandle, createPipe)
 import System.Process (ProcessHandle, runProcess, waitForProcess, terminateProcess)
 import System.Process.Internals (withProcessHandle, ProcessHandle__(..))
 import System.Posix.Signals (signalProcess, sigINT)
+import Network.Socket hiding (shutdown)
 
 import qualified Gdbmi.Commands       as C
 import qualified Gdbmi.Representation as R
@@ -36,7 +38,7 @@ import qualified Gdbmi.Semantics      as S
 
 data Context = Context { -- {{{1
 -- gdb process {{{2
-    ctxProcess       :: ProcessHandle
+    ctxProcess       :: Maybe ProcessHandle
   , ctxCommandPipe   :: Handle
   , ctxOutputPipe    :: Handle
   , ctxLog           :: Maybe Handle
@@ -77,6 +79,11 @@ data Config -- {{{1
       confCommandLine :: [String]        -- ^ command line to execute. The library will add \"--interpreter mi\".
     , confLogfile     :: Maybe FilePath  -- ^ optinonally a file path to a log file for GDB\/MI input and output. \'-\' means stdout.
   }
+  | ConfigTCP {
+      confTCPHost     :: String
+    , confTCPPort     :: Int
+    , confTCPLogfile  :: Maybe FilePath  -- ^ optinonally a file path to a log file for GDB\/MI input and output. \'-\' means stdout.
+  } deriving (Eq, Show)
 
 default_config :: Config -- {{{2
 -- | Default configuration: "gdb" command line, no log file
@@ -86,16 +93,18 @@ setup :: Config -> Callback -> IO Context -- {{{1
 -- | Launch a GDB instance in Machine Interface mode.
 --
 -- The child process is run in a new session to avoid receiving SIGINTs when issuing -exec-interrupt.
-setup config callback = do
+--
+-- In case of ConfigTCP we use a TCP connection to MI interface instead of child process.
+setup Config{..} callback = do
   (commandR,  commandW)  <- createPipe >>= asHandles
   (outputR,   outputW)   <- createPipe >>= asHandles
-  phandle <- runProcess "setsid" (confCommandLine config ++ ["--interpreter", "mi"])
+  phandle <- runProcess "setsid" (confCommandLine ++ ["--interpreter", "mi"])
                  Nothing Nothing
                  (Just commandR)
                  (Just outputW)
                  Nothing
   mapM_ (`hSetBuffering` LineBuffering) [commandW, outputR]
-  logH <- case (confLogfile config) of
+  logH <- case confLogfile of
     Nothing  -> return    $ Nothing
     Just "-" -> return    $ Just stdout
     Just f   -> fmap Just $ openFile f WriteMode
@@ -107,7 +116,7 @@ setup config callback = do
   ctx        <- mfix (\ctx -> do
       itid <- forkIO (handleCommands ctx)
       otid <- forkIO (handleOutput ctx)
-      return $ Context phandle commandW outputR logH callback itid otid currentJob finished nextToken jobs
+      return $ Context (Just phandle) commandW outputR logH callback itid otid currentJob finished nextToken jobs
     )
   return ctx
   where
@@ -116,8 +125,33 @@ setup config callback = do
     h2 <- fdToHandle f2
     return (h1, h2)
 
+setup ConfigTCP{..} callback = do
+  addr <- head <$> getAddrInfo Nothing (Just confTCPHost) (Just $ show confTCPPort)
+  sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+  connect sock $ addrAddress addr
+  h <- socketToHandle sock ReadWriteMode
+  let commandW = h
+      outputR = h
+
+  mapM_ (`hSetBuffering` LineBuffering) [commandW, outputR]
+  logH <- case confTCPLogfile of
+    Nothing  -> return    $ Nothing
+    Just "-" -> return    $ Just stdout
+    Just f   -> fmap Just $ openFile f WriteMode
+
+  currentJob <- newEmptyMVar
+  finished   <- newEmptyMVar
+  nextToken  <- newTVarIO 0
+  jobs       <- newTChanIO
+  ctx        <- mfix (\ctx -> do
+      itid <- forkIO (handleCommands ctx)
+      otid <- forkIO (handleOutput ctx)
+      return $ Context Nothing commandW outputR logH callback itid otid currentJob finished nextToken jobs
+    )
+  return ctx
+
 kill ctx = do
-  terminateProcess $ ctxProcess ctx
+  maybe (return ()) terminateProcess (ctxProcess ctx)
   mapM_ (killThread . ($ctx)) [ctxCommandThread, ctxOutputThread]
   case ctxLog ctx of
     Nothing -> return ()
@@ -140,7 +174,7 @@ shutdown ctx = do
   replicateM_ 2 (takeMVar (ctxFinished ctx))
   interrupt ctx
   writeCommand ctx C.gdb_exit 0
-  _ <- waitForProcess (ctxProcess ctx)
+  maybe (return ()) (void . waitForProcess) (ctxProcess ctx)
   putMVar (ctxFinished ctx) ()
   case ctxLog ctx of
     Nothing -> return ()
@@ -151,10 +185,13 @@ shutdown ctx = do
 
 -- | Send SIGINT to GDB process
 interrupt ctx = do
-  pid <- getPid (ctxProcess ctx)
-  case pid of
+  case ctxProcess ctx of
     Nothing -> return ()
-    Just p  -> signalProcess sigINT p
+    Just proc -> do
+      pid <- getPid proc
+      case pid of
+        Nothing -> return ()
+        Just p  -> signalProcess sigINT p
 
 send_command :: Context -> R.Command -> IO R.Response -- {{{1
 -- | Send a GDB command and wait for the response.
