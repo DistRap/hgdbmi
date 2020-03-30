@@ -52,7 +52,6 @@ module Gdbmi.Representation
 ) where
 
 -- imports {{{1
-import Control.Applicative ((<$>), (<*>), (<*))
 import Data.Char (isAscii)
 import Data.List (find)
 import Data.Maybe (isNothing)
@@ -339,7 +338,7 @@ p_list = try p_emptyList <|> try p_valueList <|> p_resultList
       rest <- many (char ',' >> p_value)
       _ <- char ']'
       return $ ValueList (first:rest)
-  
+
     p_resultList = do
       _ <- char '['
       first <- p_result

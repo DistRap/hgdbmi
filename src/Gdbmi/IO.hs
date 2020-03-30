@@ -16,7 +16,6 @@ module Gdbmi.IO
 ) where
 
 -- imports {{{1
-import Control.Applicative ((<*>), (<$>))
 import Control.Concurrent (forkIO, killThread, ThreadId, MVar, newEmptyMVar, tryTakeMVar, putMVar, takeMVar)
 import Control.Concurrent.STM (TVar, TChan, TMVar, newEmptyTMVar, newTVarIO, newTChanIO, atomically, takeTMVar, readTVar, writeTVar, writeTChan, readTChan, putTMVar)
 import Control.Exception (catchJust)
@@ -24,11 +23,11 @@ import Control.Exception.Base (AsyncException(ThreadKilled))
 import Control.Monad (replicateM_, when, void)
 import Control.Monad.Fix (mfix)
 import Data.List (partition)
-import Prelude hiding (catch, interact)
+import Prelude hiding (interact)
 import System.IO (Handle, hSetBuffering, BufferMode(LineBuffering), hPutStr, hWaitForInput, hGetLine, IOMode(WriteMode), stdout, openFile, hFlush, hClose, IOMode(..))
 import System.Posix.IO (fdToHandle, createPipe)
 import System.Process (ProcessHandle, runProcess, waitForProcess, terminateProcess)
-import System.Process.Internals (withProcessHandle, ProcessHandle__(..))
+import System.Process.Internals (withProcessHandle, ProcessHandle__(..), PHANDLE)
 import System.Posix.Signals (signalProcess, sigINT)
 import Network.Socket hiding (shutdown)
 
@@ -150,6 +149,7 @@ setup ConfigTCP{..} callback = do
     )
   return ctx
 
+kill :: Context -> IO ()
 kill ctx = do
   maybe (return ()) terminateProcess (ctxProcess ctx)
   mapM_ (killThread . ($ctx)) [ctxCommandThread, ctxOutputThread]
@@ -161,11 +161,12 @@ kill ctx = do
         else return ()
 
 -- | returns Just pid or Nothing if process has already exited
+getPid :: ProcessHandle -> IO (Maybe PHANDLE)
 getPid ph = withProcessHandle ph go
   where
     go ph_ = case ph_ of
                OpenHandle x   -> return $ Just x
-               ClosedHandle _ -> return Nothing
+               _              -> return Nothing
 
 shutdown :: Context -> IO () -- {{{1
 -- | Shut down the GDB instance and all resources associated with the 'Context'.
@@ -184,6 +185,7 @@ shutdown ctx = do
         else return ()
 
 -- | Send SIGINT to GDB process
+interrupt :: Context -> IO ()
 interrupt ctx = do
   case ctxProcess ctx of
     Nothing -> return ()

@@ -41,6 +41,7 @@ module Gdbmi.Commands
   -- ** Program Execution
   -- | <http://sourceware.org/gdb/current/onlinedocs/gdb/GDB_002fMI-Program-Execution.html>
   exec_continue,
+  exec_continue_opts,
   exec_finish,
   exec_interrupt,
   exec_jump,
@@ -48,6 +49,7 @@ module Gdbmi.Commands
   exec_next_instruction,
   exec_return,
   exec_run,
+  exec_run_opts,
   exec_step,
   exec_step_instruction,
   exec_until,

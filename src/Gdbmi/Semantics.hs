@@ -26,7 +26,7 @@ module Gdbmi.Semantics
 ) where
 
 -- import {{{1
-import Control.Applicative ((<$>), (<*>), (<|>))
+import Control.Applicative ((<|>))
 import Control.Monad (guard, msum, (<=<))
 import Data.List (find)
 
@@ -223,12 +223,14 @@ response_read_memory_bytes _ = Nothing
 hexContents :: [Result] -> Maybe Integer
 hexContents rs = get rs (tryRead . ("0x"++) . toBigEndian) "contents"
 
+toBigEndian :: String -> String
 toBigEndian a = go $ reverse a
   where go (x:y:xs) = y:x:(go xs)
+        go [_] = error "Got even number of characters in toBigEndian"
         go [] = ""
 
 headMay :: [a] -> Maybe a
-headMay (x:xs) = Just x
+headMay (x:_xs) = Just x
 headMay [] = Nothing
 
 
@@ -245,7 +247,7 @@ notification_stopped items = responseStopped items
 
 -- utils {{{1
 get :: [Result] -> (String -> Maybe a) -> (String -> Maybe a) -- {{{2
-get rs parse key = find ((key==) . resVariable) rs >>= asConst . resValue >>= parse
+get rs parser key = find ((key==) . resVariable) rs >>= asConst . resValue >>= parser
 
 tryRead :: Read a => String -> Maybe a -- {{{2
 tryRead str = case readsPrec 0 str of
