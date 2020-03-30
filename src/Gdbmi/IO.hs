@@ -281,16 +281,9 @@ writeCommand ctx cmd token =
 readOutput :: Context -> IO R.Output -- {{{2
 readOutput ctx = do
   _ <- hWaitForInput (ctxOutputPipe ctx) (-1)
-  str <- outputString (ctxOutputPipe ctx)
+  str <- hGetLine (ctxOutputPipe ctx)
   debugLog ctx False str
   return (R.parse_output str)
-  where
-    outputString handle = outputLines handle >>= return . unlines
-    outputLines handle = do
-      line <- hGetLine handle
-      if line == "(gdb) "
-        then return [line]
-        else outputLines handle >>= return . (line:)
 
 debugLog :: Context -> Bool -> String -> IO () -- {{{2
 debugLog ctx io text = 

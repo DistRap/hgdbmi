@@ -230,17 +230,17 @@ parse_output str = case parse p_output "gdb" str of
 
 p_output :: Parser Output -- {{{3
 -- http://sourceware.org/bugzilla/show_bug.cgi?id=7708
--- p_output = Output <$> many p_outOfBandRecord <*> optionMaybe p_resultRecord <* string "(gdb) " <* newline <* eof
+-- p_output = Output <$> many p_outOfBandRecord <*> optionMaybe p_resultRecord <* string "(gdb) "
 p_output = do
   oob  <- many        p_outOfBandRecord
   rr   <- optionMaybe p_resultRecord
   oob' <- many        p_outOfBandRecord
-  string "(gdb) " >> newline >> eof
+  optional $ string "(gdb) "
   return $ Output (oob ++ oob') rr
 
 p_resultRecord :: Parser ResultRecord -- {{{3
 p_resultRecord =
-  ResultRecord <$> optionMaybe p_token <* char '^' <*> p_resultClass <*> many (char ',' >> p_result) <* newline
+  ResultRecord <$> optionMaybe p_token <* char '^' <*> p_resultClass <*> many (char ',' >> p_result) <* optional newline
 
 p_outOfBandRecord :: Parser OutOfBandRecord -- {{{3
 p_outOfBandRecord =
@@ -267,7 +267,7 @@ p_notifyAsyncOutput =
 
 p_asyncOutput :: Parser AsyncOutput -- {{{3
 p_asyncOutput =
-  AsyncOutput <$> p_asyncClass <*> many (char ',' >> p_result) <* newline
+  AsyncOutput <$> p_asyncClass <*> many (char ',' >> p_result) <* optional newline
 
 p_resultClass :: Parser ResultClass -- {{{3
 p_resultClass =
@@ -345,7 +345,7 @@ p_list = try p_emptyList <|> try p_valueList <|> p_resultList
 p_streamRecord :: Parser StreamRecord -- {{{3
 p_streamRecord = do
   sr <- anyStreamRecord
-  _ <- newline -- the documentation does not specifiy this newline, but this is what GDB is doing
+  _ <- optional newline -- the documentation does not specifiy this newline, but this is what GDB is doing
   return sr
   where
     anyStreamRecord =
