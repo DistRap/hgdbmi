@@ -1,5 +1,5 @@
 name:           hgdbmi
-category:       Development
+category:       Embedded
 version:        0.3
 license:        BSD3
 cabal-version:  >= 1.14
