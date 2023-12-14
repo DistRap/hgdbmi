@@ -152,7 +152,7 @@ setup ConfigTCP{..} callback = do
 kill :: Context -> IO ()
 kill ctx = do
   maybe (return ()) terminateProcess (ctxProcess ctx)
-  mapM_ (killThread . ($ctx)) [ctxCommandThread, ctxOutputThread]
+  mapM_ (killThread . ($ ctx)) [ctxCommandThread, ctxOutputThread]
   case ctxLog ctx of
     Nothing -> return ()
     Just handle ->
@@ -171,7 +171,7 @@ getPid ph = withProcessHandle ph go
 shutdown :: Context -> IO () -- {{{1
 -- | Shut down the GDB instance and all resources associated with the 'Context'.
 shutdown ctx = do
-  mapM_ (killThread . ($ctx)) [ctxCommandThread, ctxOutputThread]
+  mapM_ (killThread . ($ ctx)) [ctxCommandThread, ctxOutputThread]
   replicateM_ 2 (takeMVar (ctxFinished ctx))
   interrupt ctx
   writeCommand ctx C.gdb_exit 0
@@ -253,7 +253,7 @@ callBack ctx output = forkIO go >> return ()
         streams         = R.output_stream output
         notifications   = R.output_notification output
         (stops, others) = partition ((&&) <$> (R.Exec==) . R.notiClass <*> (R.ACStop==) . R.notiAsyncClass) notifications
-        Just stops'     = sequence $ map (S.notification_stopped . R.notiResults) stops
+        mstops          = sequence $ map (S.notification_stopped . R.notiResults) stops
       in case stoppedCbMb of
         Nothing -> do
           when (not (null streams))       (streamsCb streams)
@@ -261,7 +261,9 @@ callBack ctx output = forkIO go >> return ()
         Just stoppedCb -> do
           when (not (null streams))       (streamsCb streams)
           when (not (null others))        (notifyCb others)
-          when (not (null stops'))        (stoppedCb stops')
+          case mstops of
+            Just stops' | not (null stops') -> stoppedCb stops'
+            _ -> pure ()
 
 handleKill :: Context -> IO () -> IO ()
 handleKill ctx action = catchJust select action handler
