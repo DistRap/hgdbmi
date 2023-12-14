@@ -1,14 +1,14 @@
 -- | Semantical data structures and conversion functions for GDB\/MI output.
---  
+--
 -- While working with 'Gdbmi.Representation.Response' and 'Gdbmi.Representation.Notification' is always possible in general,
 -- handling the generic 'Gdbmi.Representation.Result' lists is cumbersome.
 -- This module provides convenient data types instead to facilitate pattern matching etc..
---  
+--
 -- This module is incomplete, as we only implemented what we needed up to now.
 module Gdbmi.Semantics
 -- export {{{1
 (
-  -- * Conversion Functions  
+  -- * Conversion Functions
   -- | A conversion fails if the result list does not contain the expected values.
   response_break_insert,
   response_data_evaluate_expression,
@@ -107,7 +107,7 @@ responseBreakpoint (Result variable value) = do
   (Tuple rs) <- asTuple value
   Breakpoint
     <$> get rs tryRead "number"
-    <*> get rs Just    "type" 
+    <*> get rs Just    "type"
     <*> get rs tryRead "disp"
     <*> get rs gdbBool "enabled"
     <*> get rs Just    "addr"
@@ -153,14 +153,14 @@ responseStopped rs = do
 responseStopReason :: [Result] -> Maybe StopReason  -- {{{2
 responseStopReason rs = do
   reason <- find (("reason"==) . resVariable) rs >>= asConst . resValue
-  case reason of 
+  case reason of
     "breakpoint-hit" ->
       BreakpointHit
         <$> get rs tryRead "disp"
         <*> get rs tryRead "bkptno"
     "end-stepping-range" -> Just EndSteppingRange
     "function-finished"  -> Just FunctionFinished
-    _ -> Nothing 
+    _ -> Nothing
 
 responseArgs :: Result -> Maybe [Arg] -- {{{2
 responseArgs (Result variable value) = do

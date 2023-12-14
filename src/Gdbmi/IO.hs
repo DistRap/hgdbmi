@@ -60,7 +60,7 @@ data Job = Job {
   }
 
 -- | Call-back functions for asynchronous GDB output.
--- 
+--
 -- The call-backs are called in a separate thread per GDB output, so they may block.
 --
 -- Stop events are 'Gdbmi.Representation.Notification' events with 'R.NotificationClass' 'R.Exec' and 'R.AsyncClass' 'R.ACStop'.
@@ -234,7 +234,7 @@ handleOutput ctx = handleKill ctx $ do
       maybJob <- tryTakeMVar (ctxCurrentJob ctx)
       case maybJob of
         Nothing -> error "result record lost!"
-        Just job -> 
+        Just job ->
           if (R.get_token output /= Just (jobToken job))
             then error $ "token missmatch! " ++ show (R.get_token output) ++ " vs. " ++ show (jobToken job)
             else atomically $ putTMVar (jobResponse job) response
@@ -290,7 +290,7 @@ readOutput ctx = do
   return (R.parse_output str)
 
 debugLog :: Context -> Bool -> String -> IO () -- {{{2
-debugLog ctx io text = 
+debugLog ctx io text =
   let
     prefix = if io then "/i " else "/o "
     line = ((unlines . map (prefix++) . lines) text)

@@ -21,7 +21,7 @@ module Gdbmi.Representation
   Output(..),
   ResultRecord(..),
   OutOfBandRecord(..),
-  AsyncRecord(..), 
+  AsyncRecord(..),
   ExecAsyncOutput(..),
   StatusAsyncOutput(..),
   NotifyAsyncOutput(..),
@@ -390,7 +390,7 @@ data Response -- {{{2
   -- | The 'ResultRecord' of an 'Output'
   = Response {
       respClass   :: ResultClass
-    , respResults :: [Result]   
+    , respResults :: [Result]
     }
     deriving (Show)
 
@@ -421,7 +421,7 @@ data StreamClass -- {{{3
   deriving Show
 
 output_response :: Output -> Maybe Response -- {{{2
--- | Extract the response from an output, if existent. 
+-- | Extract the response from an output, if existent.
 output_response (Output _ Nothing) = Nothing
 output_response (Output _ (Just (ResultRecord _ rc rs))) = Just $ Response rc rs
 
@@ -436,7 +436,7 @@ output_notification (Output oobs _) = map (notification . unp) $ filter isNotifi
     unp x = error $ "unexpected parameter: " ++ show x
 
     notification (ARExecAsyncOutput (ExecAsyncOutput _ (AsyncOutput ac rs))) = Notification Exec ac rs
-    notification (ARStatusAsyncOutput (StatusAsyncOutput _ (AsyncOutput ac rs))) = Notification Status ac rs 
+    notification (ARStatusAsyncOutput (StatusAsyncOutput _ (AsyncOutput ac rs))) = Notification Status ac rs
     notification (ARNotifyAsyncOutput (NotifyAsyncOutput _ (AsyncOutput ac rs))) = Notification Notify ac rs
 
 output_stream :: Output -> [Stream] -- {{{2
@@ -471,10 +471,10 @@ asList _         = Nothing
 
 -- token {{{1
 type Token = Int
- 
+
 -- | Return the token of the given object, if existent.
 class GetToken a where
-  get_token :: a -> Maybe Token 
+  get_token :: a -> Maybe Token
 
 instance GetToken ResultRecord where
   get_token (ResultRecord token _ _) = token
@@ -513,7 +513,7 @@ parameter_valid (RawString s) = validParam s
 parameter_valid (QuotedString s) = validParam s
 
 validParam :: String -> Bool -- {{{2
-validParam param 
+validParam param
   | null param = False
   | isCString param = isNothing $ find (not . isAscii) param
   | otherwise = isNothing $ find isSpecial param

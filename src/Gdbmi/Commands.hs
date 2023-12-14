@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 -- | Constructor functions for 'Gdmi.Representation.Command' values.
--- 
+--
 -- Please consult the cited GDB documentation for the semantics of the individual commands.
 module Gdbmi.Commands
 -- {{{1 exports
@@ -180,7 +180,7 @@ module Gdbmi.Commands
   Target(..),
   Medium(..),
   Interpreter(..),
-   
+
   -- * Helper Functions
   cli_command,
   set_token
@@ -209,7 +209,7 @@ instance GdbShow Int where
 newtype Location = Location String -- {{{2
 
 instance GdbShow Location where -- {{{3
-  gdbShow (Location location) = location 
+  gdbShow (Location location) = location
 
 positive_offset_location :: Int -> Location -- {{{3
 positive_offset_location offset = Location $ "+" ++ gdbShow offset
@@ -417,7 +417,7 @@ instance GdbShow Interpreter where
   gdbShow MI3 = "mi3"
   gdbShow MI2 = "mi2"
   gdbShow MI1 = "mi1"
-   
+
 -- helper {{{1
 set_token :: Token -> Command -> Command -- {{{2
 -- | Set the token of a command.
@@ -430,7 +430,7 @@ set_token token (CLICommand _ x)    = CLICommand (Just token) x
 
 cli_command :: String -> Command
 -- | Create a CLI command, i.e., use the provided string literaly.
--- 
+--
 -- Some GDB commands are not reflected in the Machine Interface. In those
 -- cases one has to resort to Command Line Interface commands, which the MI
 -- accepts as well.
@@ -561,7 +561,7 @@ exec_step = cmd "exec-step" []
 
 exec_step_instruction :: Bool -> Command -- {{{3
 exec_step_instruction reverse = cmd "exec-step-instruction" $ flagOpt "--reverse" reverse ?: []
-  
+
 exec_until :: Location -> Command -- {{{3
 exec_until location = cmd "exec-until" [opt location]
 
