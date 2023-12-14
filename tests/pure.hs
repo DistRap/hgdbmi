@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Main (main) where
 
 -- imports {{{1
@@ -10,6 +11,8 @@ import Test.HUnit                     ((@=?), Assertion)
 import Text.Printf                    (printf)
 
 import Paste                          (paste)
+
+import qualified Data.Maybe
 
 main :: IO () -- {{{1
 main = defaultMain [
@@ -163,7 +166,7 @@ test_parse_output = enumTestGroup "parse_output" $ map runTest [
 (gdb) 
 |], Output
       [
-        OOBAsyncRecord $ ARNotifyAsyncOutput $ NotifyAsyncOutput Nothing $ AsyncOutput ACLibraryLoaded 
+        OOBAsyncRecord $ ARNotifyAsyncOutput $ NotifyAsyncOutput Nothing $ AsyncOutput ACLibraryLoaded
           [
             Result "id" (VConst "/lib64/ld-linux-x86-64.so.2")
           , Result "target-name" (VConst "/lib64/ld-linux-x86-64.so.2")
@@ -171,7 +174,7 @@ test_parse_output = enumTestGroup "parse_output" $ map runTest [
           , Result "symbols-loaded" (VConst "0")
           , Result "thread-group" (VConst "i1")
           ]
-      , OOBAsyncRecord $ ARNotifyAsyncOutput $ NotifyAsyncOutput Nothing $ AsyncOutput ACLibraryLoaded 
+      , OOBAsyncRecord $ ARNotifyAsyncOutput $ NotifyAsyncOutput Nothing $ AsyncOutput ACLibraryLoaded
           [
             Result "id" (VConst "/lib/libc.so.6")
           , Result "target-name" (VConst "/lib/libc.so.6")
@@ -216,15 +219,15 @@ test_response_break_insert = enumTestGroup "response_break_insert" $ map runTest
 (gdb) 
 |], Breakpoint 1 "breakpoint" BreakpointKeep True "0x0000000000400ba9" "ec_thread_0" "ec.c" "/tmp/ec.c" 303 0 "ec.c:ec_thread_0")
   ]
-  where 
+  where
     runTest :: (String, Breakpoint) -> Assertion -- {{{3
     runTest (str, bp) =
       let
         output = parse_output (tail str)
-        bp' = do 
+        bp' = do
           response <- output_response output
           response_break_insert (respResults response)
-      in 
+      in
         show (Just bp) @=? show bp'
 
 test_response_stopped :: Test -- {{{2
@@ -233,42 +236,43 @@ test_response_stopped = enumTestGroup "response_stopped" $ map runTest [
   ([paste|
 *stopped,reason="breakpoint-hit",disp="keep",bkptno="7",frame={addr="0x0000000000400e24",func="ec_thread_1",args=[{name="ec_cont",value="0x400ed5"}],file="ec.c",fullname="/tmp/ec.c",line="433"},thread-id="1",stopped-threads="all",core="1"
 (gdb) 
-|], Stopped (BreakpointHit BreakpointKeep 7) (Frame Nothing "0x0000000000400e24" "ec_thread_1" (Just [Arg "ec_cont" "0x400ed5"]) "ec.c" (Just "/tmp/ec.c") 433) 1 "all" 1)
+|], Stopped (BreakpointHit BreakpointKeep 7) (Frame Nothing "0x0000000000400e24" "ec_thread_1" (Just [Arg "ec_cont" "0x400ed5"]) (Just "ec.c") (Just "/tmp/ec.c") (Just 433)) 1 "all" 1)
   , -- end stepping range {{{3
   ([paste|
 *stopped,reason="end-stepping-range",frame={addr="0x00000000004017fa",func="main",args=[],file="pal.c",fullname="/tmp/pal.c",line="196"},thread-id="1",stopped-threads="all",core="1"
 (gdb) 
-|], Stopped EndSteppingRange (Frame Nothing "0x00000000004017fa" "main" (Just []) "pal.c" (Just "/tmp/pal.c") 196) 1 "all" 1)
+|], Stopped EndSteppingRange (Frame Nothing "0x00000000004017fa" "main" (Just []) (Just "pal.c") (Just "/tmp/pal.c") (Just 196)) 1 "all" 1)
   ]
     where
     runTest :: (String, Stopped) -> Assertion -- {{{3
     runTest (str, stp) =
       let
         output = parse_output (tail str)
-        [notification] = output_notification output
-        stp' = notification_stopped (notiResults notification)
+        stp' = case output_notification output of
+          [notification] -> notification_stopped (notiResults notification)
+          _ -> error "No notification"
       in
         show (Just stp) @=? show stp'
 
 test_response_stack_list_frames :: Test -- {{{2
 test_response_stack_list_frames = enumTestGroup "response_stack_list_frames" $ map runTest [
-    -- example {{{3 
+    -- example {{{3
     ([paste|
 ^done,stack=[frame={level="0",addr="0x00007ffff7a9dcc7",func="_IO_vfprintf_internal",file="vfprintf.c",line="1647"},frame={level="1",addr="0x00007ffff7ac2c79",func="__IO_vsprintf",file="iovsprintf.c",line="43"},frame={level="2",addr="0x0000000000402520",func="logger_syscall",file="logger.c",fullname="/tmp/logger.c",line="57"},frame={level="3",addr="0x0000000000401c13",func="os_receive",file="core.c",fullname="/tmp/core.c",line="145"},frame={level="4",addr="0x0000000000401489",func="tc_receive",file="pal.c",fullname="/tmp/pal.c",line="116"},frame={level="5",addr="0x0000000000400e2e",func="ec_thread_1",file="ec.c",fullname="/tmp/ec.c",line="433"},frame={level="6",addr="0x00000000004016b2",func="flash_write_cb",file="pal.c",fullname="/tmp/pal.c",line="156"},frame={level="7",addr="0x00000000004019ff",func="cb_default",file="core.c",fullname="/tmp/core.c",line="90"},frame={level="8",addr="0x0000000000402f05",func="dispatcher_run",file="dispatcher.c",fullname="/tmp/dispatcher.c",line="93"},frame={level="9",addr="0x000000000040188e",func="os_run",file="core.c",fullname="/tmp/core.c",line="37"},frame={level="10",addr="0x00000000004012f0",func="pal_run",file="pal.c",fullname="/tmp/pal.c",line="70"},frame={level="11",addr="0x0000000000401818",func="main",file="pal.c",fullname="/tmp/pal.c",line="200"}]
 (gdb) 
 |], Stack [
-        Frame  (Just 0) "0x00007ffff7a9dcc7" "_IO_vfprintf_internal" Nothing "vfprintf.c"   Nothing 1647
-      , Frame  (Just 1) "0x00007ffff7ac2c79" "__IO_vsprintf"         Nothing "iovsprintf.c" Nothing 43
-      , Frame  (Just 2) "0x0000000000402520" "logger_syscall"        Nothing "logger.c"     (Just "/tmp/logger.c") 57
-      , Frame  (Just 3) "0x0000000000401c13" "os_receive"            Nothing "core.c"       (Just "/tmp/core.c") 145
-      , Frame  (Just 4) "0x0000000000401489" "tc_receive"            Nothing "pal.c"        (Just "/tmp/pal.c") 116
-      , Frame  (Just 5) "0x0000000000400e2e" "ec_thread_1"           Nothing "ec.c"         (Just "/tmp/ec.c") 433
-      , Frame  (Just 6) "0x00000000004016b2" "flash_write_cb"        Nothing "pal.c"        (Just "/tmp/pal.c") 156
-      , Frame  (Just 7) "0x00000000004019ff" "cb_default"            Nothing "core.c"       (Just "/tmp/core.c") 90
-      , Frame  (Just 8) "0x0000000000402f05" "dispatcher_run"        Nothing "dispatcher.c" (Just "/tmp/dispatcher.c") 93
-      , Frame  (Just 9) "0x000000000040188e" "os_run"                Nothing "core.c"       (Just "/tmp/core.c") 37
-      , Frame (Just 10) "0x00000000004012f0" "pal_run"               Nothing "pal.c"        (Just "/tmp/pal.c") 70
-      , Frame (Just 11) "0x0000000000401818" "main"                  Nothing "pal.c"        (Just "/tmp/pal.c") 200
+        Frame  (Just 0) "0x00007ffff7a9dcc7" "_IO_vfprintf_internal" Nothing (Just "vfprintf.c")   Nothing (Just 1647)
+      , Frame  (Just 1) "0x00007ffff7ac2c79" "__IO_vsprintf"         Nothing (Just "iovsprintf.c") Nothing (Just 43)
+      , Frame  (Just 2) "0x0000000000402520" "logger_syscall"        Nothing (Just "logger.c")     (Just "/tmp/logger.c") (Just 57)
+      , Frame  (Just 3) "0x0000000000401c13" "os_receive"            Nothing (Just "core.c")       (Just "/tmp/core.c") (Just 145)
+      , Frame  (Just 4) "0x0000000000401489" "tc_receive"            Nothing (Just "pal.c")        (Just "/tmp/pal.c") (Just 116)
+      , Frame  (Just 5) "0x0000000000400e2e" "ec_thread_1"           Nothing (Just "ec.c")         (Just "/tmp/ec.c") (Just 433)
+      , Frame  (Just 6) "0x00000000004016b2" "flash_write_cb"        Nothing (Just "pal.c")        (Just "/tmp/pal.c") (Just 156)
+      , Frame  (Just 7) "0x00000000004019ff" "cb_default"            Nothing (Just "core.c")       (Just "/tmp/core.c") (Just 90)
+      , Frame  (Just 8) "0x0000000000402f05" "dispatcher_run"        Nothing (Just "dispatcher.c") (Just "/tmp/dispatcher.c") (Just 93)
+      , Frame  (Just 9) "0x000000000040188e" "os_run"                Nothing (Just "core.c")       (Just "/tmp/core.c") (Just 37)
+      , Frame (Just 10) "0x00000000004012f0" "pal_run"               Nothing (Just "pal.c")        (Just "/tmp/pal.c") (Just 70)
+      , Frame (Just 11) "0x0000000000401818" "main"                  Nothing (Just "pal.c")        (Just "/tmp/pal.c") (Just 200)
       ])
   ]
   where
@@ -276,10 +280,10 @@ test_response_stack_list_frames = enumTestGroup "response_stack_list_frames" $ m
     runTest (str, stack) =
       let
         output = parse_output (tail str)
-        stack' = do 
+        stack' = do
           response <- output_response output
           response_stack_list_frames (respResults response)
-      in 
+      in
         show (Just stack) @=? show stack'
 
 test_response_exec_return :: Test -- {{{2
@@ -288,12 +292,12 @@ test_response_exec_return = enumTestGroup "response_exec_return" $ map runTest [
   ([paste|
 ^done,frame={level="0",addr="0x080483cc",func="f",args=[],file="foo.c",fullname="/tmp/foo.c",line="9"}
 (gdb) 
-|], Frame (Just 0) "0x080483cc" "f" (Just []) "foo.c" (Just "/tmp/foo.c") 9
+|], Frame (Just 0) "0x080483cc" "f" (Just []) (Just "foo.c") (Just "/tmp/foo.c") (Just 9)
   )
   ]
   where
     runTest :: (String, Frame) -> Assertion -- {{{3
-    runTest (str, frame) = 
+    runTest (str, frame) =
       let
         output = parse_output (tail str)
         frame' = do
@@ -315,7 +319,7 @@ test_response_data_evaluate_expression = enumTestGroup "response_data_evaluate_e
     runTest (str, expr) =
       let
         output = parse_output (tail str)
-        (Just response) = output_response output
+        response = Data.Maybe.fromMaybe (error "No output") $ output_response output
       in do
         RCDone @=? respClass response
         Just expr @=? (response_data_evaluate_expression . respResults) response
@@ -333,7 +337,7 @@ test_response_error = enumTestGroup "response_error" $ map runTest [
     runTest (str, err) =
       let
         output = parse_output (tail str)
-        (Just response) = output_response output
+        response = Data.Maybe.fromMaybe (error "No output") $ output_response output
       in do
         RCError @=? respClass response
         Just err @=? (response_error . respResults) response

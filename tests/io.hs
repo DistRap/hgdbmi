@@ -65,7 +65,7 @@ callback mv = G.Callback print print (Just (putMVar mv))
 setup :: IO ()
 setup = do
   writeFile "example.c" example
-  (ec, sout, serr) <- readProcessWithExitCode "gcc" (words "-o example -g example.c") "" 
+  (ec, sout, serr) <- readProcessWithExitCode "gcc" (words "-o example -g example.c") ""
   case ec of
     ExitFailure ec' -> do
       putStrLn sout
@@ -89,7 +89,7 @@ assert what x y = if (x == y)
   else error $ printf "assertion failed: %s: %s vs. %s" what (show x) (show y)
 
 test ::  IO ()
-test = do 
+test = do
   _            <- setup
   mv           <- newEmptyMVar
   ctx          <- G.setup config (callback mv)
@@ -101,7 +101,7 @@ test = do
   let (Just bp) = S.response_break_insert bp'
   _            <- cmd R.RCRunning $ C.exec_run
   forM_ [(0::Int)..10] (\counter -> do
-      [stopped]      <- takeMVar mv 
+      [stopped]      <- takeMVar mv
       assert "breakpoint number" ((S.bkptHitNumber . S.stoppedReason) stopped) (S.bkptNumber bp)
       value'          <- cmd R.RCDone $ C.data_evaluate_expression "i"
       let (Just value) = S.response_data_evaluate_expression value'
