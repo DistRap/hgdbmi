@@ -2,7 +2,7 @@ cabal-version:  2.2
 name:           hgdbmi
 category:       Embedded
 version:        0.3
-license:        BSD3
+license:        BSD-3-Clause
 license-file:   LICENSE
 author:         Alexander Bernauer, Evan Martin
 maintainer:     Alexander Bernauer <acopton@gmail.com>
