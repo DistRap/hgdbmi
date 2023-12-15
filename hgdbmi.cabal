@@ -23,17 +23,18 @@ Description:
   This module is tested with GDB version 7.4.
 
 build-type:     Simple
+extra-source-files:
+  LICENSE
+  README.md
+
+extra-doc-files:
+  CHANGELOG.md
 
 flag io-testsuite
   default:
     False
   description:
     Enable testsuite, which requires external binaries
-
-extra-source-files:
-    CHANGELOG.md
-    LICENSE
-    README.md
 
 source-repository head
   type: git
