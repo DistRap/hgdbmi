@@ -34,6 +34,7 @@ import Text.Printf            (printf)
 
 import Paste (paste)
 
+import qualified Data.Maybe
 import qualified Gdbmi.IO             as G
 import qualified Gdbmi.Commands       as C
 import qualified Gdbmi.Semantics      as S
@@ -98,13 +99,13 @@ test = do
   _            <- cmd R.RCDone $ C.file_exec_and_symbols (Just "example")
   let loc       = C.file_function_location "example.c" "print"
   bp'          <- cmd R.RCDone $ C.break_insert False False False False False Nothing Nothing Nothing loc
-  let (Just bp) = S.response_break_insert bp'
+  let bp        = Data.Maybe.fromMaybe (error "No reponse_break") $ S.response_break_insert bp'
   _            <- cmd R.RCRunning $ C.exec_run
   forM_ [(0::Int)..10] (\counter -> do
       [stopped]      <- takeMVar mv
       assert "breakpoint number" ((S.bkptHitNumber . S.stoppedReason) stopped) (S.bkptNumber bp)
       value'          <- cmd R.RCDone $ C.data_evaluate_expression "i"
-      let (Just value) = S.response_data_evaluate_expression value'
+      let value        = Data.Maybe.fromMaybe (error "No reponse_break") $ S.response_data_evaluate_expression value'
       assert "value of i" value (show counter)
       _               <- cmd R.RCRunning $ C.exec_continue
       return ()
