@@ -1,2 +1,5 @@
+packages:
+  ./hgdbmi.cabal
+
 package hgdbmi
   flags: +io-testsuite
