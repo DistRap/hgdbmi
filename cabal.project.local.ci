@@ -1,0 +1,3 @@
+package hgdbmi
+  ghc-options:
+    -Werror
