@@ -24,6 +24,11 @@ Description:
 
 build-type:     Simple
 
+extra-source-files:
+    CHANGELOG.md
+    LICENSE
+    README.md
+
 source-repository head
   type: git
   location: git://github.com/copton/hgdbmi.git
