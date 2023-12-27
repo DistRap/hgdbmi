@@ -170,14 +170,14 @@ data AsyncClass -- {{{3
   | ACRecordStarted
   | ACRecordStopped
   | ACDownload
-  deriving (Show, Eq)
+  deriving (Eq, Show)
 
 data Result -- {{{3
   = Result {
       resVariable :: Variable
     , resValue    :: Value
   }
-  deriving Show
+  deriving (Eq, Show)
 
 type Variable = String -- {{{3
 
@@ -185,7 +185,7 @@ data Value -- {{{3
   = VConst Const
   | VTuple Tuple
   | VList  List
-  deriving Show
+  deriving (Eq, Show)
 
 type Const = CString -- {{{3
 
@@ -193,31 +193,31 @@ data Tuple -- {{{3
   = Tuple {
       tupleResults :: [Result]
   }
-  deriving Show
+  deriving (Eq, Show)
 
 data List -- {{{3
   = EmptyList
   | ValueList [Value]
   | ResultList [Result]
-  deriving Show
+  deriving (Eq, Show)
 
 data StreamRecord  -- {{{3
   = SRConsoleStreamOutput ConsoleStreamOutput
   | SRTargetStreamOutput TargetStreamOutput
   | SRLogStreamOutput LogStreamOutput
-  deriving Show
+  deriving (Eq, Show)
 
 data ConsoleStreamOutput -- {{{3
   = ConsoleStreamOutput CString
-  deriving Show
+  deriving (Eq, Show)
 
 data TargetStreamOutput -- {{{3
   = TargetStreamOutput CString
-  deriving Show
+  deriving (Eq, Show)
 
 data LogStreamOutput -- {{{3
   = LogStreamOutput CString
-  deriving Show
+  deriving (Eq, Show)
 
 type CString = String -- {{{3
 
@@ -392,7 +392,7 @@ data Response -- {{{2
       respClass   :: ResultClass
     , respResults :: [Result]
     }
-    deriving (Show)
+    deriving (Eq, Show)
 
 data Notification -- {{{2
   -- | Simplification of the 'AsyncRecord' type hierarchie, a possible 'OutOfBandRecord' value of an 'Output'.
@@ -401,7 +401,7 @@ data Notification -- {{{2
     , notiAsyncClass :: AsyncClass
     , notiResults    :: [Result]
     }
-    deriving Show
+    deriving (Eq, Show)
 
 data NotificationClass -- {{{3
   = Exec    -- ^ 'ARExecAsyncOutput'

@@ -23,18 +23,16 @@
 -}
 module Main (main) where
 
-import Control.Concurrent     (newEmptyMVar, putMVar, takeMVar, MVar)
 import Control.Exception.Base (bracket)
-import Control.Monad          (forM_, when)
-import System.Directory       (removeDirectoryRecursive, getCurrentDirectory, setCurrentDirectory)
-import System.Exit            (ExitCode(..))
-import System.IO.Temp         (createTempDirectory)
-import System.Process         (readProcessWithExitCode)
-import Text.Printf            (printf)
+import Control.Monad (forM_)
+import System.Directory (removeDirectoryRecursive, getCurrentDirectory, setCurrentDirectory)
+import System.Exit (ExitCode(..))
+import System.IO.Temp (createTempDirectory)
+import System.Process (readProcessWithExitCode)
+import Text.Printf (printf)
 
 import Paste (paste)
 
-import qualified Data.Maybe
 import Gdb
 
 example :: String
@@ -70,15 +68,15 @@ assert what x y = if (x == y)
   then pure ()
   else error $ printf "assertion failed: %s: %s vs. %s" what (show x) (show y)
 
-test :: IO (Either String ())
+test :: IO (Either GDBError ())
 test = do
   buildExample
-  runGdb $ do
+  runGDB $ do
     cli "tty /dev/null"
     file "example"
     let loc = file_function_location "example.c" "print"
     bp <- breakpoint loc
-    run
+    _ <- run
     forM_ [(0::Int)..10] $ \counter -> do
         onBreak $ \stopped -> do
           assert
@@ -110,5 +108,5 @@ withTemporaryDirectory f = bracket acquire release inbetween
 main :: IO ()
 main =
   withTemporaryDirectory $ do
-    test >>= either error pure
+    test >>= either (error . show) pure
     readFile "gdb.log" >>= putStr

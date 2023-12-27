@@ -8,12 +8,17 @@
 -- >>> when (respClass resp /= RCDone) (error ("unexpected response: " ++ show resp))
 --
 module Gdbmi.IO
--- exports {{{1
-(
-    Context, Config(..), Callback(..)
-  , default_config
-  , setup, shutdown, interrupt, kill, send_command
-) where
+  ( Context
+  , Config(..)
+  , armConfig
+  , tcpConfig
+  , Callback(..)
+  , setup
+  , shutdown
+  , interrupt
+  , kill
+  , send_command
+  ) where
 
 -- imports {{{1
 import Control.Concurrent (forkIO, killThread, ThreadId, MVar, newEmptyMVar, tryTakeMVar, putMVar, takeMVar)
@@ -22,6 +27,7 @@ import Control.Exception (catchJust)
 import Control.Exception.Base (AsyncException(ThreadKilled))
 import Control.Monad (replicateM_, when, void)
 import Control.Monad.Fix (mfix)
+import Data.Default.Class (Default(def))
 import Data.List (partition)
 import Prelude hiding (interact)
 import System.IO (Handle, hSetBuffering, BufferMode(LineBuffering), hPutStr, hWaitForInput, hGetLine, IOMode(WriteMode), stdout, openFile, hFlush, hClose, IOMode(..))
@@ -84,9 +90,30 @@ data Config -- {{{1
     , confTCPLogfile  :: Maybe FilePath  -- ^ optinonally a file path to a log file for GDB\/MI input and output. \'-\' means stdout.
   } deriving (Eq, Show)
 
-default_config :: Config -- {{{2
--- | Default configuration: "gdb" command line, no log file
-default_config = Config ["gdb"] Nothing
+instance Default Config where
+  def =
+    Config
+      { confCommandLine = pure "gdb"
+      , confLogfile = pure "gdb.log"
+      }
+
+armConfig :: Config
+armConfig =
+  Config
+    { confCommandLine = pure "arm-none-eabi-gdb" 
+    , confLogfile = pure "gdb.log"
+    }
+
+tcpConfig
+  :: String
+  -> Int
+  -> Config
+tcpConfig host port =
+  ConfigTCP
+    { confTCPHost = host
+    , confTCPPort = port
+    , confTCPLogfile = pure "gdb-tcp.log"
+    }
 
 setup :: Config -> Callback -> IO Context -- {{{1
 -- | Launch a GDB instance in Machine Interface mode.

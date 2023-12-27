@@ -49,7 +49,9 @@ library
   build-depends:
       base        >= 4 && < 5
     , async
+    , data-default-class
     , directory
+    , exceptions
     , mtl
     , network
     , parsec

@@ -1,12 +1,56 @@
-module Gdb.Monad where
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleContexts #-}
 
+module Gdb.Monad
+  ( GDBT
+  , GDBError(..)
+  , runGDBT
+  , MonadGDB(..)
+  , runGDB
+  , runGDBConfig
+  , command
+  , commandRaw
+  , cmd
+  , cmd'
+  , cmdAny
+  , cmdWarn
+  , run
+  , continue
+  , interrupt
+  , waitStop
+  , isBreak
+  , isBreakHit
+  , waitBreak
+  , onBreak
+  , showStops
+  , cli
+  , echo
+  , break
+  , breakpoint
+  , breakpoint'
+  , eval
+  , readMem
+  , Programmer(..)
+  , extRemote
+  , file
+  , load
+  ) where
+
+import Prelude hiding (break)
 import Control.Exception
 import Control.Monad
-import Control.Monad.Trans.Reader
-import Control.Monad.IO.Class
+import Control.Monad.Catch (MonadCatch, MonadMask, MonadThrow)
+import Control.Monad.Except (MonadError, throwError)
+import Control.Monad.IO.Class (MonadIO(liftIO))
+import Control.Monad.Reader (MonadReader, ask)
+import Control.Monad.Trans (MonadTrans, lift)
+import Control.Monad.Trans.Except (ExceptT, runExceptT)
+import Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import Control.Concurrent
 import Control.Concurrent.Async
 import Control.Concurrent.STM
+import Data.Default.Class (Default(def))
+import Gdbmi.IO (Config(..), Context)
 
 import System.Posix.Signals (installHandler, Handler(Catch), sigINT)
 
@@ -23,35 +67,77 @@ data GDBContext = GDBContext {
   , contextLog     :: TBQueue String
   }
 
-type GdbT m = ReaderT GDBContext m
-type GdbMonad a = GdbT IO a
+data GDBError
+  = GDBError_IOException SomeException
+  | GDBError_CommandFailed String String String
+  | GDBError_UnexepectedResponse String [R.Result]
+  deriving (Show)
 
-defaultConfig :: G.Config
-defaultConfig = G.Config ["gdb"] (Just "gdb.log")
+newtype GDBT m a = GDBT
+  { _unGDBT
+      :: ExceptT GDBError
+          (ReaderT GDBContext m) a
+  }
+  deriving
+    ( Functor
+    , Applicative
+    , Monad
+    , MonadReader GDBContext
+    , MonadError GDBError
+    , MonadCatch
+    , MonadMask
+    , MonadThrow
+    , MonadIO
+    )
 
-armConfig :: G.Config
-armConfig = G.Config ["arm-none-eabi-gdb"] (Just "gdb.log")
+instance MonadTrans GDBT where
+  lift = GDBT . lift . lift
 
-tcpConfig :: String -> Int -> G.Config
-tcpConfig host port = G.ConfigTCP host port (Just "gdb-tcp.log")
+-- | Run GDBT transformer
+runGDBT
+  :: Monad m
+  => GDBContext
+  -> GDBT m a
+  -> m (Either GDBError a)
+runGDBT ctx =
+    (`runReaderT` ctx)
+  . runExceptT
+  . _unGDBT
 
-runGdb :: (MonadIO m) => (GdbT m a) -> m (Either String a)
-runGdb = runGdbConfig defaultConfig
+class ( MonadIO m
+      , MonadError GDBError m
+      ) => MonadGDB m where
+  getContext :: m GDBContext
+  getMIContext :: m Context
 
-runGdbConfig :: MonadIO m
-             => G.Config
-             -> GdbT m b
-             -> m (Either String b)
-runGdbConfig config act = withGDB config act
+instance MonadIO m => MonadGDB (GDBT m) where
+  getContext = ask
+  getMIContext = contextGdbMI <$> ask
 
-sigintHandler :: IO b -> IO b
-sigintHandler ofWhat = do
-    tid <- myThreadId
-    bracket (installHandler sigINT (Catch $ throwTo tid UserInterrupt) Nothing)
-        (\old -> installHandler sigINT old Nothing) $ pure $ ofWhat
+runGDB
+  :: ( MonadIO m
+     , MonadMask m
+     )
+  => GDBT m a
+  -> m (Either GDBError a)
+runGDB = runGDBConfig def
 
--- | Set-up GDB connection and run `GdbT` application
-withGDB :: MonadIO m => G.Config -> GdbT m b -> m (Either String b)
+runGDBConfig
+  :: ( MonadIO m
+     , MonadMask m
+     )
+  => Config
+  -> GDBT m b
+  -> m (Either GDBError b)
+runGDBConfig config act =
+  withGDB config act
+
+-- | Set-up GDB connection and run `GDBT` application
+withGDB
+  :: MonadIO m
+  => Config
+  -> GDBT m a
+  -> m (Either GDBError a)
 withGDB config act = do
   (stops, streamQ, notifQ, userQ) <- liftIO $ do
     stops <- atomically $ newEmptyTMVar
@@ -62,14 +148,18 @@ withGDB config act = do
     pure (stops, streamQ, notifQ, userQ)
   ctx <- liftIO $ G.setup config (callbackQueues stops streamQ notifQ)
 
-  x <- flip runReaderT (GDBContext ctx stops userQ) act
+  x <- runGDBT (GDBContext ctx stops userQ) act
   liftIO $ G.shutdown ctx
-  pure $ Right x
+  pure x
 
 -- | `withGdb` variant that prints data from queues, installs `sigintHandler`
 -- and prints all logs at the end
-withGDB' :: MonadIO m => G.Config -> GdbT IO b -> m (Either String b)
-withGDB' config act = liftIO $ do
+_withGDB'
+  :: MonadIO m
+  => Config
+  -> GDBT IO a
+  -> m (Either GDBError a)
+_withGDB' config act = liftIO $ do
   stops <- atomically $ newEmptyTMVar
   (streamQ, notifQ, userQ) <- atomically $ (,,)
     <$> newTBQueue 1000
@@ -90,11 +180,12 @@ withGDB' config act = liftIO $ do
 
   x <- try
     $ sigintHandler
-    $ flip runReaderT (GDBContext ctx stops userQ) act
+    $ runGDBT (GDBContext ctx stops userQ) act
 
-  res <- case x of
-    Left e -> pure $ Left $ show (e :: SomeException)
-    Right r -> pure $ Right r
+  let res = case x of
+        Left e -> Left $ GDBError_IOException (e :: SomeException)
+        Right (Left e) -> Left e
+        Right (Right r) -> pure r
 
   G.shutdown ctx
 
@@ -109,79 +200,129 @@ withGDB' config act = liftIO $ do
     pstream' (R.Stream _ s) = putStr s
     pstream = mapM_ pstream'
 
-callbackQueues :: TMVar [S.Stopped] -> TBQueue [R.Stream] -> TBQueue [R.Notification] -> G.Callback
-callbackQueues mv logs events = G.Callback
-  (toQueue logs)
-  (toQueue events)
-  (Just (atomically . putTMVar mv))
+    sigintHandler :: IO b -> IO b
+    sigintHandler ofWhat = do
+        tid <- myThreadId
+        bracket
+          (installHandler sigINT (Catch $ throwTo tid UserInterrupt) Nothing)
+          (\old -> installHandler sigINT old Nothing)
+          $ pure ofWhat
+
+callbackQueues
+  :: TMVar [S.Stopped]
+  -> TBQueue [R.Stream]
+  -> TBQueue [R.Notification]
+  -> G.Callback
+callbackQueues mv logs events =
+  G.Callback
+    (toQueue logs)
+    (toQueue events)
+    (Just (atomically . putTMVar mv))
   where
     toQueue q = atomically . writeTBQueue q
 
+sendCommand
+  :: MonadGDB m
+  => R.Command
+  -> m R.Response
+sendCommand c = do
+  ctx <- getMIContext
+  liftIO $ G.send_command ctx c
+
 -- |Send GDB-MI command and fail if response differs from
 -- expected response `rc`
-command :: G.Context -> R.ResultClass -> R.Command -> IO [R.Result]
-command ctx rc x = do
-  resp <- G.send_command ctx x
-  let msg = printf "command '%s' failed (%s): %s"
-              (R.render_command x)
-              (show (R.respClass resp))
-              ((show . S.response_error . R.respResults) resp)
-  when (R.respClass resp /= rc) (error msg)
+command
+  :: MonadGDB m
+  => R.ResultClass
+  -> R.Command
+  -> m [R.Result]
+command rc x = do
+  resp <- sendCommand x
+  unless
+    (R.respClass resp == rc)
+    $ throwError
+        $ GDBError_CommandFailed
+            (R.render_command x)
+            (show (R.respClass resp))
+            ((show . S.response_error . R.respResults) resp)
   pure (R.respResults resp)
 
--- |Send GDB-MI command and pure raw response
-commandRaw :: G.Context -> R.Command -> IO R.Response
-commandRaw ctx x = do
-  resp <- G.send_command ctx x
-  pure resp
+-- |Send GDB-MI command and return raw response
+commandRaw
+  :: MonadGDB m
+  => R.Command
+  -> m R.Response
+commandRaw = sendCommand
 
 -- |Send GDB command but don't fail if response differs from
 -- expected response `rc`, print error message instead
-cmdWarn :: (MonadIO m) => R.ResultClass -> R.Command -> GdbT m ()
+cmdWarn
+  :: MonadGDB m
+  => R.ResultClass
+  -> R.Command
+  -> m ()
 cmdWarn rc x = do
-  ctx <- fmap contextGdbMI ask
-  resp <- liftIO $ commandRaw ctx x
-  let msg = printf "command '%s' got unexpected response (%s): %s"
-              (R.render_command x)
-              (show (R.respClass resp))
-              ((show . S.response_error . R.respResults) resp)
-  when (R.respClass resp /= rc) (echo msg)
+  resp <- commandRaw x
+  unless
+    (R.respClass resp /= rc)
+    $ echo
+       $ Text.Printf.printf "command '%s' got unexpected response (%s): %s"
+           (R.render_command x)
+           (show (R.respClass resp))
+           ((show . S.response_error . R.respResults) resp)
 
 -- | Accept any response class
-cmdAny :: (MonadIO m) => R.Command -> GdbT m ()
-cmdAny x = do
-  ctx <- fmap contextGdbMI ask
-  void $ liftIO $ commandRaw ctx x
+cmdAny
+  :: MonadGDB m
+  => R.Command
+  -> m ()
+cmdAny = void . commandRaw
 
 -- | Send GDB command expecting `rc` response
-cmd :: (MonadIO m) => R.ResultClass -> R.Command -> GdbT m [R.Result]
-cmd rc x = do
-  ctx <- fmap contextGdbMI ask
-  liftIO $ command ctx rc x
+cmd
+  :: MonadGDB m
+  => R.ResultClass
+  -> R.Command
+  -> m [R.Result]
+cmd = command
 
 -- | Like `cmd` but discards result
-cmd' :: (MonadIO m) => R.ResultClass -> R.Command -> GdbT m ()
-cmd' rc x = void $ cmd rc x
+cmd'
+  :: MonadGDB m
+  => R.ResultClass
+  -> R.Command
+  -> m ()
+cmd' rc c = cmd rc c >> pure ()
 
 -- | Run program loaded in GDB
-run :: (MonadIO m) => GdbT m [R.Result]
+run
+  :: MonadGDB m
+  => m [R.Result]
 run = do
   cmd R.RCRunning $ C.exec_run
 
 -- | Continue execution (for example after breakpoint)
-continue :: (MonadIO m) => GdbT m ()
+continue
+  :: MonadGDB m
+  => m ()
 continue = do
   cmd' R.RCRunning $ C.exec_continue
 
 -- | Interrupt background execution of the target
-interrupt :: (MonadIO m) => GdbT m ()
+interrupt
+  :: MonadGDB m
+  => m ()
 interrupt = do
-  cmd' R.RCDone $ C.exec_interrupt (Left True) -- --all
+  cmd'
+    R.RCDone
+    $ C.exec_interrupt (Left True)
 
 -- | Wait for stop condition (e.g. breakpoint)
-waitStop :: (MonadIO m) => GdbT m [S.Stopped]
+waitStop
+  :: MonadGDB m
+  => m [S.Stopped]
 waitStop = do
-  tmvar <- fmap contextStops ask
+  tmvar <- contextStops <$> getContext
 
   _flushedOldStops <- liftIO $ atomically $ do
     tryTakeTMVar tmvar
@@ -191,73 +332,122 @@ waitStop = do
   pure stops
 
 -- | Did we stop due to breakpoint
-isBreak :: S.Stopped -> Bool
+isBreak
+  :: S.Stopped
+  -> Bool
 isBreak = isBreakHit . S.stoppedReason
 
 -- | Did we stop due to breakpoint
-isBreakHit :: S.StopReason -> Bool
+isBreakHit
+  :: S.StopReason
+  -> Bool
 isBreakHit S.BreakpointHit{} = True
 isBreakHit _ = False
 
 -- | Wait till breakpoint is hit
-waitBreak :: (MonadIO m) => GdbT m S.Stopped
+waitBreak
+  :: MonadGDB m
+  => m S.Stopped
 waitBreak = do
   stops <- waitStop
   if any isBreak stops
     then pure $ head $ filter isBreak stops
     else waitBreak
 
--- | Perform action `act` when breakpoint is hit and continue
--- afterwards
-onBreak :: (MonadIO m) => (S.Stopped -> GdbT m ()) -> GdbT m ()
+-- | Perform action `act` when breakpoint is hit
+-- and continue afterwards
+onBreak
+  :: MonadGDB m
+  => (S.Stopped -> m ())
+  -> m ()
 onBreak act = do
   brk <- waitBreak
   act brk
   continue
 
 -- TODO: more pretty
-showStops :: (MonadIO m) => [S.Stopped] -> GdbT m ()
+showStops
+  :: MonadGDB m
+  => [S.Stopped]
+  -> m ()
 showStops = mapM_ showStop
-
-showStop :: (MonadIO m, Show a) => a -> m ()
-showStop s = liftIO $ print s -- show (stoppedReason s)
+  where
+    showStop
+      :: ( MonadIO m
+         , Show a
+         )
+      => a
+      -> m ()
+    showStop s = liftIO $ print s
 
 -- | Run raw GDB cli command
-cli :: (MonadIO m) => String -> GdbT m ()
+cli
+  :: MonadGDB m
+  => String
+  -> m ()
 cli x = cmdAny $ C.cli_command x
 
-echo :: (MonadIO m) => String -> GdbT m ()
+echo
+  :: MonadGDB m
+  => String
+  -> m ()
 echo msg = do
-  logQ <- fmap contextLog ask
+  logQ <- contextLog <$> getContext
   liftIO $ atomically $ writeTBQueue logQ msg
 
 -- | Send Ctrl-C to GDB
-break :: (MonadIO m) => GdbT m ()
-break = do
-  ctx <- fmap contextGdbMI ask
-  liftIO $ G.interrupt ctx
+break
+  :: MonadGDB m
+  => m ()
+break =
+  getMIContext
+  >>= liftIO . G.interrupt
 
 -- | Create new breakpoint
-breakpoint :: (MonadIO m) => C.Location -> GdbT m S.Breakpoint
+breakpoint
+  :: MonadGDB m
+  => C.Location
+  -> m S.Breakpoint
 breakpoint loc = do
   res <- cmd R.RCDone $ C.break_insert False False False False False Nothing Nothing Nothing loc
   case S.response_break_insert res of
     Just value -> pure value
-    Nothing -> error "Unexpected response"
+    Nothing ->
+      throwError
+        $ GDBError_UnexepectedResponse
+            "response_break_insert"
+            res
 
 -- | Create new breakpoint, discard result
-breakpoint' :: (MonadIO m) => C.Location -> GdbT m ()
+breakpoint'
+  :: MonadGDB m
+  => C.Location
+  -> m ()
 breakpoint' = void . breakpoint
 
 -- | Like `p` (var printing)
-eval :: (MonadIO m) => String -> GdbT m String
+eval
+  :: MonadGDB m
+  => String
+  -> m String
 eval expr = do
-  value' <- cmd R.RCDone $ C.data_evaluate_expression expr
-  case S.response_data_evaluate_expression value' of
+  res <- cmd R.RCDone $ C.data_evaluate_expression expr
+  case S.response_data_evaluate_expression res of
     Just value -> pure value
-    Nothing -> error "Unexpected response"
+    Nothing ->
+      throwError
+        $ GDBError_UnexepectedResponse
+            "response_data_evaluate_expression"
+            res
 
-readMem :: (MonadIO m, Show a, Num b) => a -> Int -> GdbT m (Maybe b)
+readMem
+  :: ( MonadGDB m
+     , Show a
+     , Num b
+     )
+  => a
+  -> Int
+  -> m (Maybe b)
 readMem addr size = do
   res <- cmd R.RCDone $ C.data_read_memory_bytes Nothing (show addr) size
   pure $ S.response_read_memory_bytes res
@@ -271,7 +461,10 @@ toTarget :: Programmer -> C.Medium
 toTarget (BMP dev) = C.SerialDevice dev
 toTarget (BMPHosted host port) = C.TcpHost host port
 
-extRemote :: (MonadIO m) => Programmer -> GdbT m ()
+extRemote
+  :: MonadGDB m
+  => Programmer
+  -> m ()
 extRemote prog = do
   cmd' R.RCDone $ C.gdb_set "mi-async on"
   _ <- cmd R.RCConnected $ C.target_select $ C.ExtendedRemote $ toTarget prog
@@ -283,11 +476,16 @@ extRemote prog = do
   pure ()
 
 -- | Load file and its symbols
-file :: (MonadIO m) => FilePath -> GdbT m ()
+file
+  :: MonadGDB m
+  => FilePath
+  -> m ()
 file fp = do
   cmd' R.RCDone $ C.file_exec_and_symbols (Just fp)
 
 -- | Upload file to target device
-load :: (MonadIO m) => GdbT m [R.Result]
+load
+  :: MonadGDB m
+  => m [R.Result]
 load = do
   cmd R.RCDone $ C.target_download
