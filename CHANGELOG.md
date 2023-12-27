@@ -4,6 +4,8 @@
   * Support for `ExtendedRemoteTarget`
   * Support for `async` mode
   * `ConfigTCP` for connecting to GDB over network
+  * `Gdb` module, `Gdb.Monad` module wrapping MI interface
+    into a monadic one
 
 * Changes
   * `frameFile` and `frameLine` fields of `Frame` are now

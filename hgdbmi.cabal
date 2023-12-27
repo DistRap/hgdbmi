@@ -48,14 +48,19 @@ source-repository this
 library
   build-depends:
       base        >= 4 && < 5
+    , async
+    , directory
+    , mtl
+    , network
     , parsec
     , process
-    , unix
-    , directory
     , stm
-    , network
+    , transformers
+    , unix
 
   exposed-modules:
+    Gdb
+    Gdb.Monad
     Gdbmi.IO
     Gdbmi.Commands
     Gdbmi.Representation
