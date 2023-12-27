@@ -455,11 +455,13 @@ readMem addr size = do
 data Programmer =
     BMP String
   | BMPHosted String Int
+  | RemoteGDB String Int
   deriving (Eq, Show)
 
 toTarget :: Programmer -> C.Medium
 toTarget (BMP dev) = C.SerialDevice dev
 toTarget (BMPHosted host port) = C.TcpHost host port
+toTarget (RemoteGDB host port) = C.TcpHost host port
 
 extRemote
   :: MonadGDB m
@@ -472,8 +474,13 @@ extRemote prog = do
   cli "monitor connect_srs disable"
   cli "set mem inaccessible-by-default off"
   cmd' R.RCDone $ C.gdb_set "mem inaccessible-by-default off"
-  _ <- cmd R.RCDone $ C.target_attach (Left 1)
+  unless
+    (isRemoteGDB prog)
+    $ cmd' R.RCDone $ C.target_attach (Left 1)
   pure ()
+  where
+    isRemoteGDB (RemoteGDB _ _) = True
+    isRemoteGDB _ = False
 
 -- | Load file and its symbols
 file
