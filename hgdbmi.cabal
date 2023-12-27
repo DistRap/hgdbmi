@@ -7,8 +7,8 @@ license-file:   LICENSE
 author:         Alexander Bernauer, Evan Martin, sorki
 maintainer:     sorki <srk@48.io>
 stability:      provisional
-homepage:       https://github.com/copton/hgdbmi
-bug-reports:    https://github.com/copton/hgdbmi/issues
+homepage:       https://github.com/DistRap/hgdbmi
+bug-reports:    https://github.com/DistRap/hgdbmi/issues
 copyright:      (c) 2023 sorki <srk@48.io>, 2012 Alexander Bernauer <acopton@gmail.com>, 2008 Evan Martin <martine@danga.com>
 Synopsis:       GDB Machine Interface: program-driven control of GDB
 Description:
@@ -38,12 +38,7 @@ flag io-testsuite
 
 source-repository head
   type: git
-  location: git://github.com/copton/hgdbmi.git
-
-source-repository this
-  type: git
-  location: git://github.com/copton/hgdbmi.git
-  tag: v0.2
+  location: git://github.com/DistRap/hgdbmi.git
 
 library
   build-depends:
