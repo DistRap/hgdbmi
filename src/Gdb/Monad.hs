@@ -49,8 +49,8 @@ module Gdb.Monad
   ) where
 
 import Prelude hiding (break)
-import Control.Exception
-import Control.Monad
+import Control.Exception (SomeException)
+import Control.Concurrent.STM (TMVar, TBQueue)
 import Control.Monad.Catch (MonadCatch, MonadMask, MonadThrow)
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.IO.Class (MonadIO(liftIO))
@@ -58,34 +58,45 @@ import Control.Monad.Reader (MonadReader, ask)
 import Control.Monad.Trans (MonadTrans, lift)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import Control.Monad.Trans.Reader (ReaderT, runReaderT)
-import Control.Concurrent
-import Control.Concurrent.Async
-import Control.Concurrent.STM
 import Data.Default.Class (Default(def))
+import Gdbmi.Commands (Medium)
 import Gdbmi.IO (Config(..), Context)
+import Gdbmi.Representation
+  ( Command
+  , Notification
+  , Response(..)
+  , Result
+  , ResultClass(..)
+  , Stream(..)
+  , render_command
+  )
+import Gdbmi.IO (Callback(..))
+import Gdbmi.Semantics (Breakpoint(..), Stopped, StopReason(..))
+import System.Posix.Signals (Handler(Catch))
 
-import System.Posix.Signals (installHandler, Handler(Catch), sigINT)
-
-import Text.Printf (printf)
-
-import qualified Gdbmi.IO             as G
-import qualified Gdbmi.Commands       as C
-import qualified Gdbmi.Semantics      as S
-import qualified Gdbmi.Representation as R
+import qualified Control.Concurrent
+import qualified Control.Concurrent.Async
+import qualified Control.Concurrent.STM
+import qualified Control.Exception
+import qualified Control.Monad
+import qualified Gdbmi.IO
+import qualified Gdbmi.Commands
+import qualified Gdbmi.Semantics
+import qualified System.Posix.Signals
+import qualified Text.Printf
 
 data GDBContext = GDBContext {
-    contextGdbMI   :: G.Context
-  , contextStops   :: TMVar [S.Stopped]
+    contextGdbMI   :: Context
+  , contextStops   :: TMVar [Stopped]
   , contextLog     :: TBQueue String
   }
-
 
 -- * GDBError
 
 data GDBError
   = GDBError_IOException SomeException
   | GDBError_CommandFailed String String String
-  | GDBError_UnexepectedResponse String [R.Result]
+  | GDBError_UnexepectedResponse String [Result]
   deriving (Show)
 
 
@@ -164,16 +175,24 @@ withGDB
   -> m (Either GDBError a)
 withGDB config act = do
   (stops, streamQ, notifQ, userQ) <- liftIO $ do
-    stops <- atomically $ newEmptyTMVar
-    (streamQ, notifQ, userQ) <- atomically $ (,,)
-      <$> newTBQueue 1000
-      <*> newTBQueue 1000
-      <*> newTBQueue 1000
+    stops <-
+      Control.Concurrent.STM.atomically
+      $ Control.Concurrent.STM.newEmptyTMVar
+    (streamQ, notifQ, userQ) <-
+      Control.Concurrent.STM.atomically
+      $ (,,)
+        <$> Control.Concurrent.STM.newTBQueue 1000
+        <*> Control.Concurrent.STM.newTBQueue 1000
+        <*> Control.Concurrent.STM.newTBQueue 1000
     pure (stops, streamQ, notifQ, userQ)
-  ctx <- liftIO $ G.setup config (callbackQueues stops streamQ notifQ)
+  ctx <-
+    liftIO
+      $ Gdbmi.IO.setup
+          config
+          (callbackQueues stops streamQ notifQ)
 
   x <- runGDBT (GDBContext ctx stops userQ) act
-  liftIO $ G.shutdown ctx
+  liftIO $ Gdbmi.IO.shutdown ctx
   pure x
 
 -- | `withGdb` variant that prints data from queues, installs `sigintHandler`
@@ -184,25 +203,46 @@ _withGDB'
   -> GDBT IO a
   -> m (Either GDBError a)
 _withGDB' config act = liftIO $ do
-  stops <- atomically $ newEmptyTMVar
-  (streamQ, notifQ, userQ) <- atomically $ (,,)
-    <$> newTBQueue 1000
-    <*> newTBQueue 1000
-    <*> newTBQueue 1000
+  stops <-
+    Control.Concurrent.STM.atomically
+    $ Control.Concurrent.STM.newEmptyTMVar
+  (streamQ, notifQ, userQ) <-
+    Control.Concurrent.STM.atomically $ (,,)
+      <$> Control.Concurrent.STM.newTBQueue 1000
+      <*> Control.Concurrent.STM.newTBQueue 1000
+      <*> Control.Concurrent.STM.newTBQueue 1000
 
-  lock <- newMVar ()
+  lock <- Control.Concurrent.newMVar ()
   --- XXX: make this verbose mode configurable
-  void $ async $ forever $ do
-    stream <- atomically $ readTBQueue streamQ
-    withMVar lock $ const $ pstream stream
+  Control.Monad.void
+    $ Control.Concurrent.Async.async
+      $ Control.Monad.forever $ do
+          stream <-
+            Control.Concurrent.STM.atomically
+            $ Control.Concurrent.STM.readTBQueue streamQ
+          Control.Concurrent.withMVar
+            lock
+            $ const
+            $ pstream stream
 
-  void $ async $ forever $ do
-    q <- atomically $ readTBQueue userQ
-    withMVar lock $ const $ putStrLn q
+  Control.Monad.void
+    $ Control.Concurrent.Async.async
+      $ Control.Monad.forever $ do
+          q <-
+            Control.Concurrent.STM.atomically
+            $ Control.Concurrent.STM.readTBQueue userQ
+          Control.Concurrent.withMVar
+            lock
+            $ const
+            $ putStrLn q
 
-  ctx <- G.setup config (callbackQueues stops streamQ notifQ)
+  ctx <-
+    Gdbmi.IO.setup
+      config
+      (callbackQueues stops streamQ notifQ)
 
-  x <- try
+  x <-
+    Control.Exception.try
     $ sigintHandler
     $ runGDBT (GDBContext ctx stops userQ) act
 
@@ -211,47 +251,69 @@ _withGDB' config act = liftIO $ do
         Right (Left e) -> Left e
         Right (Right r) -> pure r
 
-  G.shutdown ctx
+  Gdbmi.IO.shutdown ctx
 
   -- dump remaining data in streams
-  (logs, _events) <- atomically $ (,) <$> flushTBQueue streamQ <*> flushTBQueue notifQ
+  (logs, _events) <-
+    Control.Concurrent.STM.atomically
+      $ (,)
+        <$> Control.Concurrent.STM.flushTBQueue streamQ
+        <*> Control.Concurrent.STM.flushTBQueue notifQ
 
   pstream $ concat logs
   -- we ignore async notifications (events) for now
   --print notif
   pure res
   where
-    pstream' (R.Stream _ s) = putStr s
+    pstream' (Stream _ s) = putStr s
     pstream = mapM_ pstream'
 
     sigintHandler :: IO b -> IO b
     sigintHandler ofWhat = do
-        tid <- myThreadId
-        bracket
-          (installHandler sigINT (Catch $ throwTo tid UserInterrupt) Nothing)
-          (\old -> installHandler sigINT old Nothing)
+        tid <- Control.Concurrent.myThreadId
+        Control.Exception.bracket
+          (System.Posix.Signals.installHandler
+             System.Posix.Signals.sigINT
+             (Catch
+                $ Control.Exception.throwTo
+                    tid
+                    Control.Exception.UserInterrupt
+              )
+             Nothing
+          )
+          (\old ->
+             System.Posix.Signals.installHandler
+               System.Posix.Signals.sigINT
+               old
+               Nothing
+          )
           $ pure ofWhat
 
 callbackQueues
-  :: TMVar [S.Stopped]
-  -> TBQueue [R.Stream]
-  -> TBQueue [R.Notification]
-  -> G.Callback
+  :: TMVar [Stopped]
+  -> TBQueue [Stream]
+  -> TBQueue [Notification]
+  -> Callback
 callbackQueues mv logs events =
-  G.Callback
+  Callback
     (toQueue logs)
     (toQueue events)
-    (Just (atomically . putTMVar mv))
+    (Just
+      (Control.Concurrent.STM.atomically
+      . Control.Concurrent.STM.putTMVar mv)
+    )
   where
-    toQueue q = atomically . writeTBQueue q
+    toQueue q =
+      Control.Concurrent.STM.atomically
+      . Control.Concurrent.STM.writeTBQueue q
 
 sendCommand
   :: MonadGDB m
-  => R.Command
-  -> m R.Response
+  => Command
+  -> m Response
 sendCommand c = do
   ctx <- getMIContext
-  liftIO $ G.send_command ctx c
+  liftIO $ Gdbmi.IO.send_command ctx c
 
 -- * Command
 
@@ -259,64 +321,77 @@ sendCommand c = do
 -- expected response `rc`
 command
   :: MonadGDB m
-  => R.ResultClass
-  -> R.Command
-  -> m [R.Result]
+  => ResultClass
+  -> Command
+  -> m [Result]
 command rc x = do
   resp <- sendCommand x
-  unless
-    (R.respClass resp == rc)
+  Control.Monad.unless
+    (respClass resp == rc)
     $ throwError
         $ GDBError_CommandFailed
-            (R.render_command x)
-            (show (R.respClass resp))
-            ((show . S.response_error . R.respResults) resp)
-  pure (R.respResults resp)
+            (render_command x)
+            (show (respClass resp))
+            (
+              (  show
+                . Gdbmi.Semantics.response_error
+                . respResults
+              )
+              resp
+            )
+  pure (respResults resp)
 
 -- |Send GDB-MI command and return raw response
 commandRaw
   :: MonadGDB m
-  => R.Command
-  -> m R.Response
+  => Command
+  -> m Response
 commandRaw = sendCommand
 
 -- |Send GDB command but don't fail if response differs from
 -- expected response `rc`, print error message instead
 cmdWarn
   :: MonadGDB m
-  => R.ResultClass
-  -> R.Command
+  => ResultClass
+  -> Command
   -> m ()
 cmdWarn rc x = do
   resp <- commandRaw x
-  unless
-    (R.respClass resp /= rc)
+  Control.Monad.unless
+    (respClass resp /= rc)
     $ echo
-       $ Text.Printf.printf "command '%s' got unexpected response (%s): %s"
-           (R.render_command x)
-           (show (R.respClass resp))
-           ((show . S.response_error . R.respResults) resp)
+       $ Text.Printf.printf
+           "command '%s' got unexpected response (%s): %s"
+           (render_command x)
+           (show (respClass resp))
+           (
+             ( show
+             . Gdbmi.Semantics.response_error
+             . respResults
+             )
+             resp
+           )
 
 -- | Accept any response class
 cmdAny
   :: MonadGDB m
-  => R.Command
+  => Command
   -> m ()
-cmdAny = void . commandRaw
+cmdAny = Control.Monad.void . commandRaw
 
 -- | Send GDB command expecting `rc` response
 cmd
   :: MonadGDB m
-  => R.ResultClass
-  -> R.Command
-  -> m [R.Result]
+  => ResultClass
+  -> Command
+  -> m [Result]
 cmd = command
 
 -- | Like `cmd` but discards result
 cmd'
   :: MonadGDB m
-  => R.ResultClass
-  -> R.Command
+  => ResultClass
+  -> Command
   -> m ()
 cmd' rc c = cmd rc c >> pure ()
 
@@ -325,23 +400,27 @@ cli
   :: MonadGDB m
   => String
   -> m ()
-cli x = cmdAny $ C.cli_command x
+cli x = cmdAny $ Gdbmi.Commands.cli_command x
 
 -- * Control
 
 -- | Run program loaded in GDB
 run
   :: MonadGDB m
-  => m [R.Result]
+  => m [Result]
 run = do
-  cmd R.RCRunning $ C.exec_run
+  cmd
+    RCRunning
+    $ Gdbmi.Commands.exec_run
 
 -- | Continue execution (for example after breakpoint)
 continue
   :: MonadGDB m
   => m ()
 continue = do
-  cmd' R.RCRunning $ C.exec_continue
+  cmd'
+    RCRunning
+    $ Gdbmi.Commands.exec_continue
 
 -- | Interrupt background execution of the target
 interrupt
@@ -349,27 +428,32 @@ interrupt
   => m ()
 interrupt = do
   cmd'
-    R.RCDone
-    $ C.exec_interrupt (Left True)
+    RCDone
+    $ Gdbmi.Commands.exec_interrupt (Left True)
 
 -- | Wait for stop condition (e.g. breakpoint)
 waitStop
   :: MonadGDB m
-  => m [S.Stopped]
+  => m [Stopped]
 waitStop = do
   tmvar <- contextStops <$> getContext
 
-  _flushedOldStops <- liftIO $ atomically $ do
-    tryTakeTMVar tmvar
+  _flushedOldStops <-
+    liftIO
+      $ Control.Concurrent.STM.atomically
+      $ Control.Concurrent.STM.tryTakeTMVar tmvar
 
-  stops <- liftIO $ atomically $ do
-    takeTMVar tmvar
+  stops <-
+    liftIO
+      $ Control.Concurrent.STM.atomically
+      $ Control.Concurrent.STM.takeTMVar tmvar
+
   pure stops
 
 -- TODO: more pretty
 showStops
   :: MonadGDB m
-  => [S.Stopped]
+  => [Stopped]
   -> m ()
 showStops = mapM_ showStop
   where
@@ -387,7 +471,7 @@ break
   => m ()
 break =
   getMIContext
-  >>= liftIO . G.interrupt
+  >>= liftIO . Gdbmi.IO.interrupt
 
 -- | Load file and its symbols
 file
@@ -395,25 +479,41 @@ file
   => FilePath
   -> m ()
 file fp = do
-  cmd' R.RCDone $ C.file_exec_and_symbols (Just fp)
+  cmd'
+    RCDone
+    $ Gdbmi.Commands.file_exec_and_symbols (Just fp)
 
 -- | Upload file to target device
 load
   :: MonadGDB m
-  => m [R.Result]
+  => m [Result]
 load = do
-  cmd R.RCDone $ C.target_download
+  cmd
+    RCDone
+    $ Gdbmi.Commands.target_download
 
 -- * Breakpoints
 
 -- | Create new breakpoint
 breakpoint
   :: MonadGDB m
-  => C.Location
-  -> m S.Breakpoint
+  => Gdbmi.Commands.Location
+  -> m Breakpoint
 breakpoint loc = do
-  res <- cmd R.RCDone $ C.break_insert False False False False False Nothing Nothing Nothing loc
-  case S.response_break_insert res of
+  res <-
+    cmd
+      RCDone
+      $ Gdbmi.Commands.break_insert
+          False
+          False
+          False
+          False
+          False
+          Nothing
+          Nothing
+          Nothing
+          loc
+  case Gdbmi.Semantics.response_break_insert res of
     Just value -> pure value
     Nothing ->
       throwError
@@ -424,14 +524,14 @@ breakpoint loc = do
 -- | Create new breakpoint, discard result
 breakpoint'
   :: MonadGDB m
-  => C.Location
+  => Gdbmi.Commands.Location
   -> m ()
-breakpoint' = void . breakpoint
+breakpoint' = Control.Monad.void . breakpoint
 
 -- | Wait till breakpoint is hit
 waitBreak
   :: MonadGDB m
-  => m S.Stopped
+  => m Stopped
 waitBreak = do
   stops <- waitStop
   if any isBreak stops
@@ -442,7 +542,7 @@ waitBreak = do
 -- and continue afterwards
 onBreak
   :: MonadGDB m
-  => (S.Stopped -> m ())
+  => (Stopped -> m ())
   -> m ()
 onBreak act = do
   brk <- waitBreak
@@ -451,15 +551,15 @@ onBreak act = do
 
 -- | Did we stop due to breakpoint
 isBreak
-  :: S.Stopped
+  :: Stopped
   -> Bool
-isBreak = isBreakHit . S.stoppedReason
+isBreak = isBreakHit . Gdbmi.Semantics.stoppedReason
 
 -- | Did we stop due to breakpoint
 isBreakHit
-  :: S.StopReason
+  :: StopReason
   -> Bool
-isBreakHit S.BreakpointHit{} = True
+isBreakHit BreakpointHit{} = True
 isBreakHit _ = False
 
 -- * Evaluate expression
@@ -470,8 +570,11 @@ eval
   => String
   -> m String
 eval expr = do
-  res <- cmd R.RCDone $ C.data_evaluate_expression expr
-  case S.response_data_evaluate_expression res of
+  res <-
+    cmd
+      RCDone
+      $ Gdbmi.Commands.data_evaluate_expression expr
+  case Gdbmi.Semantics.response_data_evaluate_expression res of
     Just value -> pure value
     Nothing ->
       throwError
@@ -490,8 +593,14 @@ readMem
   -> Int
   -> m (Maybe b)
 readMem addr size = do
-  res <- cmd R.RCDone $ C.data_read_memory_bytes Nothing (show addr) size
-  pure $ S.response_read_memory_bytes res
+  res <-
+    cmd
+      RCDone
+      $ Gdbmi.Commands.data_read_memory_bytes
+          Nothing
+          (show addr)
+          size
+  pure $ Gdbmi.Semantics.response_read_memory_bytes res
 
 -- * Programmer
 
@@ -506,24 +615,37 @@ extRemote
   => Programmer
   -> m ()
 extRemote prog = do
-  cmd' R.RCDone $ C.gdb_set "mi-async on"
-  _ <- cmd R.RCConnected $ C.target_select $ C.ExtendedRemote $ toTarget prog
+  cmd'
+    RCDone
+    $ Gdbmi.Commands.gdb_set "mi-async on"
+  cmd'
+    RCConnected
+    $ Gdbmi.Commands.target_select
+    $ Gdbmi.Commands.ExtendedRemote $ toTarget prog
   cli "monitor swdp_scan"
   cli "monitor connect_srs disable"
   cli "set mem inaccessible-by-default off"
-  cmd' R.RCDone $ C.gdb_set "mem inaccessible-by-default off"
-  unless
+  cmd'
+    RCDone
+    $ Gdbmi.Commands.gdb_set
+        "mem inaccessible-by-default off"
+  Control.Monad.unless
     (isRemoteGDB prog)
-    $ cmd' R.RCDone $ C.target_attach (Left 1)
+    $ cmd' RCDone $ Gdbmi.Commands.target_attach (Left 1)
   pure ()
   where
     isRemoteGDB (RemoteGDB _ _) = True
     isRemoteGDB _ = False
 
-    toTarget :: Programmer -> C.Medium
-    toTarget (BMP dev) = C.SerialDevice dev
-    toTarget (BMPHosted host port) = C.TcpHost host port
-    toTarget (RemoteGDB host port) = C.TcpHost host port
+    toTarget
+      :: Programmer
+      -> Medium
+    toTarget (BMP dev) =
+      Gdbmi.Commands.SerialDevice dev
+    toTarget (BMPHosted host port) =
+      Gdbmi.Commands.TcpHost host port
+    toTarget (RemoteGDB host port) =
+      Gdbmi.Commands.TcpHost host port
 
 -- * Util
 
@@ -534,6 +656,6 @@ echo
   -> m ()
 echo msg = do
   logQ <- contextLog <$> getContext
-  liftIO $ atomically $ writeTBQueue logQ msg
-
-
+  liftIO
+    $ Control.Concurrent.STM.atomically
+    $ Control.Concurrent.STM.writeTBQueue logQ msg
