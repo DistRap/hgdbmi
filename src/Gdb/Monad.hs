@@ -2,38 +2,50 @@
 {-# LANGUAGE FlexibleContexts #-}
 
 module Gdb.Monad
-  ( GDBT
-  , GDBError(..)
+  (
+  -- * GDBError
+    GDBError(..)
+  -- * Transformer
+  , GDBT
   , runGDBT
+  -- * Monad
   , MonadGDB(..)
+  -- * Runners
   , runGDB
   , runGDBConfig
+  -- * Command
   , command
   , commandRaw
   , cmd
   , cmd'
   , cmdAny
   , cmdWarn
+  , cli
+  -- * Control
   , run
   , continue
   , interrupt
   , waitStop
-  , isBreak
-  , isBreakHit
-  , waitBreak
-  , onBreak
   , showStops
-  , cli
-  , echo
   , break
-  , breakpoint
-  , breakpoint'
-  , eval
-  , readMem
-  , Programmer(..)
-  , extRemote
   , file
   , load
+  -- * Breakpoints
+  , breakpoint
+  , breakpoint'
+  , waitBreak
+  , onBreak
+  , isBreak
+  , isBreakHit
+  -- * Evaluate expression
+  , eval
+  -- * Read memory
+  , readMem
+  -- * Programmer
+  , Programmer(..)
+  , extRemote
+  -- * Util
+  , echo
   ) where
 
 import Prelude hiding (break)
@@ -67,11 +79,17 @@ data GDBContext = GDBContext {
   , contextLog     :: TBQueue String
   }
 
+
+-- * GDBError
+
 data GDBError
   = GDBError_IOException SomeException
   | GDBError_CommandFailed String String String
   | GDBError_UnexepectedResponse String [R.Result]
   deriving (Show)
+
+
+-- * Transformer
 
 newtype GDBT m a = GDBT
   { _unGDBT
@@ -104,6 +122,8 @@ runGDBT ctx =
   . runExceptT
   . _unGDBT
 
+-- * Monad
+
 class ( MonadIO m
       , MonadError GDBError m
       ) => MonadGDB m where
@@ -114,6 +134,9 @@ instance MonadIO m => MonadGDB (GDBT m) where
   getContext = ask
   getMIContext = contextGdbMI <$> ask
 
+-- * Runners
+
+-- | Run GDBT transformer with default @Config@
 runGDB
   :: ( MonadIO m
      , MonadMask m
@@ -122,6 +145,7 @@ runGDB
   -> m (Either GDBError a)
 runGDB = runGDBConfig def
 
+-- | Run GDBT transformer with custom @Config@
 runGDBConfig
   :: ( MonadIO m
      , MonadMask m
@@ -229,6 +253,8 @@ sendCommand c = do
   ctx <- getMIContext
   liftIO $ G.send_command ctx c
 
+-- * Command
+
 -- |Send GDB-MI command and fail if response differs from
 -- expected response `rc`
 command
@@ -294,6 +320,15 @@ cmd'
   -> m ()
 cmd' rc c = cmd rc c >> pure ()
 
+-- | Run raw GDB cli command
+cli
+  :: MonadGDB m
+  => String
+  -> m ()
+cli x = cmdAny $ C.cli_command x
+
+-- * Control
+
 -- | Run program loaded in GDB
 run
   :: MonadGDB m
@@ -331,40 +366,6 @@ waitStop = do
     takeTMVar tmvar
   pure stops
 
--- | Did we stop due to breakpoint
-isBreak
-  :: S.Stopped
-  -> Bool
-isBreak = isBreakHit . S.stoppedReason
-
--- | Did we stop due to breakpoint
-isBreakHit
-  :: S.StopReason
-  -> Bool
-isBreakHit S.BreakpointHit{} = True
-isBreakHit _ = False
-
--- | Wait till breakpoint is hit
-waitBreak
-  :: MonadGDB m
-  => m S.Stopped
-waitBreak = do
-  stops <- waitStop
-  if any isBreak stops
-    then pure $ head $ filter isBreak stops
-    else waitBreak
-
--- | Perform action `act` when breakpoint is hit
--- and continue afterwards
-onBreak
-  :: MonadGDB m
-  => (S.Stopped -> m ())
-  -> m ()
-onBreak act = do
-  brk <- waitBreak
-  act brk
-  continue
-
 -- TODO: more pretty
 showStops
   :: MonadGDB m
@@ -380,21 +381,6 @@ showStops = mapM_ showStop
       -> m ()
     showStop s = liftIO $ print s
 
--- | Run raw GDB cli command
-cli
-  :: MonadGDB m
-  => String
-  -> m ()
-cli x = cmdAny $ C.cli_command x
-
-echo
-  :: MonadGDB m
-  => String
-  -> m ()
-echo msg = do
-  logQ <- contextLog <$> getContext
-  liftIO $ atomically $ writeTBQueue logQ msg
-
 -- | Send Ctrl-C to GDB
 break
   :: MonadGDB m
@@ -402,6 +388,23 @@ break
 break =
   getMIContext
   >>= liftIO . G.interrupt
+
+-- | Load file and its symbols
+file
+  :: MonadGDB m
+  => FilePath
+  -> m ()
+file fp = do
+  cmd' R.RCDone $ C.file_exec_and_symbols (Just fp)
+
+-- | Upload file to target device
+load
+  :: MonadGDB m
+  => m [R.Result]
+load = do
+  cmd R.RCDone $ C.target_download
+
+-- * Breakpoints
 
 -- | Create new breakpoint
 breakpoint
@@ -425,6 +428,42 @@ breakpoint'
   -> m ()
 breakpoint' = void . breakpoint
 
+-- | Wait till breakpoint is hit
+waitBreak
+  :: MonadGDB m
+  => m S.Stopped
+waitBreak = do
+  stops <- waitStop
+  if any isBreak stops
+    then pure $ head $ filter isBreak stops
+    else waitBreak
+
+-- | Perform action `act` when breakpoint is hit
+-- and continue afterwards
+onBreak
+  :: MonadGDB m
+  => (S.Stopped -> m ())
+  -> m ()
+onBreak act = do
+  brk <- waitBreak
+  act brk
+  continue
+
+-- | Did we stop due to breakpoint
+isBreak
+  :: S.Stopped
+  -> Bool
+isBreak = isBreakHit . S.stoppedReason
+
+-- | Did we stop due to breakpoint
+isBreakHit
+  :: S.StopReason
+  -> Bool
+isBreakHit S.BreakpointHit{} = True
+isBreakHit _ = False
+
+-- * Evaluate expression
+
 -- | Like `p` (var printing)
 eval
   :: MonadGDB m
@@ -440,6 +479,8 @@ eval expr = do
             "response_data_evaluate_expression"
             res
 
+-- * Read memory
+
 readMem
   :: ( MonadGDB m
      , Show a
@@ -452,16 +493,13 @@ readMem addr size = do
   res <- cmd R.RCDone $ C.data_read_memory_bytes Nothing (show addr) size
   pure $ S.response_read_memory_bytes res
 
+-- * Programmer
+
 data Programmer =
     BMP String
   | BMPHosted String Int
   | RemoteGDB String Int
   deriving (Eq, Show)
-
-toTarget :: Programmer -> C.Medium
-toTarget (BMP dev) = C.SerialDevice dev
-toTarget (BMPHosted host port) = C.TcpHost host port
-toTarget (RemoteGDB host port) = C.TcpHost host port
 
 extRemote
   :: MonadGDB m
@@ -482,17 +520,20 @@ extRemote prog = do
     isRemoteGDB (RemoteGDB _ _) = True
     isRemoteGDB _ = False
 
--- | Load file and its symbols
-file
-  :: MonadGDB m
-  => FilePath
-  -> m ()
-file fp = do
-  cmd' R.RCDone $ C.file_exec_and_symbols (Just fp)
+    toTarget :: Programmer -> C.Medium
+    toTarget (BMP dev) = C.SerialDevice dev
+    toTarget (BMPHosted host port) = C.TcpHost host port
+    toTarget (RemoteGDB host port) = C.TcpHost host port
 
--- | Upload file to target device
-load
+-- * Util
+
+-- | Write to log queue
+echo
   :: MonadGDB m
-  => m [R.Result]
-load = do
-  cmd R.RCDone $ C.target_download
+  => String
+  -> m ()
+echo msg = do
+  logQ <- contextLog <$> getContext
+  liftIO $ atomically $ writeTBQueue logQ msg
+
+
