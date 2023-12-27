@@ -1,5 +1,8 @@
+{-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeOperators #-}
 
 module Gdb.Monad
   (
@@ -58,6 +61,7 @@ import Control.Monad.Reader (MonadReader, ask)
 import Control.Monad.Trans (MonadTrans, lift)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import Control.Monad.Trans.Reader (ReaderT, runReaderT)
+import Control.Monad.Trans.State (StateT)
 import Data.Default.Class (Default(def))
 import Gdbmi.Commands (Medium)
 import Gdbmi.IO (Config(..), Context)
@@ -138,12 +142,28 @@ runGDBT ctx =
 class ( MonadIO m
       , MonadError GDBError m
       ) => MonadGDB m where
+
   getContext :: m GDBContext
+  default getContext
+    :: ( MonadTrans t
+       , MonadGDB m'
+       , m ~ t m'
+       )
+    => m GDBContext
+  getContext = lift getContext
+
   getMIContext :: m Context
+  default getMIContext
+    :: MonadGDB m
+    => m Context
+  getMIContext = contextGdbMI <$> getContext
 
 instance MonadIO m => MonadGDB (GDBT m) where
   getContext = ask
-  getMIContext = contextGdbMI <$> ask
+
+instance MonadGDB m => MonadGDB (StateT s m)
+instance MonadGDB m => MonadGDB (ReaderT r m)
+instance MonadGDB m => MonadGDB (ExceptT GDBError m)
 
 -- * Runners
 
