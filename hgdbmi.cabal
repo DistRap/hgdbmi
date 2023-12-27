@@ -36,6 +36,12 @@ flag io-testsuite
   description:
     Enable testsuite, which requires external binaries
 
+flag build-readme
+  default:
+    False
+  description:
+    Build README.lhs example
+
 source-repository head
   type: git
   location: git://github.com/DistRap/hgdbmi.git
@@ -66,6 +72,18 @@ library
   hs-source-dirs:     src
   ghc-options:        -Wall
   default-language:   Haskell2010
+
+executable hgdbmi-readme
+  if !flag(build-readme)
+    buildable: False
+  build-depends:
+      base >=4.12 && <5
+    , hgdbmi
+  build-tool-depends:
+      markdown-unlit:markdown-unlit
+  default-language: Haskell2010
+  main-is: README.lhs
+  ghc-options: -pgmL markdown-unlit -Wall
 
 test-suite pure
   type:             exitcode-stdio-1.0

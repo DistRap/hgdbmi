@@ -13,3 +13,22 @@ which is fork of [hgdbmi v0.1](https://hackage.haskell.org/package/hgdbmi-0.1).
  * [GDM Machine Interface](http://sourceware.org/gdb/current/onlinedocs/gdb/GDB_002fMI.html)
  * [libgdbmi](http://sourceforge.net/projects/libmigdb/) C/C++ implementation for reference
  * [Debugger Machine Interface (DMI) Working Group](https://wiki.linuxfoundation.org/en/Debugger_Machine_Interface_(DMI))
+
+## Example
+
+```haskell
+import Gdb
+
+main :: IO ()
+main = runGDB example >>= print
+
+example
+  :: MonadGDB m
+  => m String
+example = do
+  file "example"
+  breakpoint' (file_function_location "example.c" "print")
+  _ <- run
+  onBreak $ \_stopped -> do
+    eval "i"
+```
