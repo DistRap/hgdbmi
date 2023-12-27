@@ -542,12 +542,13 @@ waitBreak = do
 -- and continue afterwards
 onBreak
   :: MonadGDB m
-  => (Stopped -> m ())
-  -> m ()
+  => (Stopped -> m a)
+  -> m a
 onBreak act = do
   brk <- waitBreak
-  act brk
+  ret <- act brk
   continue
+  pure ret
 
 -- | Did we stop due to breakpoint
 isBreak
