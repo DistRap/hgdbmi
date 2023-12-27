@@ -4,3 +4,7 @@ dist-newstyle
 result
 result-*
 cabal.project.local
+example
+example.c
+gdb.log
+gdb-tcp.log
