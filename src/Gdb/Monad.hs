@@ -238,9 +238,16 @@ break = do
   liftIO $ G.interrupt ctx
 
 -- | Create new breakpoint
-breakpoint :: (MonadIO m) => C.Location -> GdbT m ()
-breakpoint loc = void $ cmd R.RCDone $
-  C.break_insert False False False False False Nothing Nothing Nothing loc
+breakpoint :: (MonadIO m) => C.Location -> GdbT m S.Breakpoint
+breakpoint loc = do
+  res <- cmd R.RCDone $ C.break_insert False False False False False Nothing Nothing Nothing loc
+  case S.response_break_insert res of
+    Just value -> pure value
+    Nothing -> error "Unexpected response"
+
+-- | Create new breakpoint, discard result
+breakpoint' :: (MonadIO m) => C.Location -> GdbT m ()
+breakpoint' = void . breakpoint
 
 -- | Like `p` (var printing)
 eval :: (MonadIO m) => String -> GdbT m String
