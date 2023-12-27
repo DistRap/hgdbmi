@@ -104,8 +104,8 @@ setup Config{..} callback = do
                  Nothing
   mapM_ (`hSetBuffering` LineBuffering) [commandW, outputR]
   logH <- case confLogfile of
-    Nothing  -> return    $ Nothing
-    Just "-" -> return    $ Just stdout
+    Nothing  -> pure    $ Nothing
+    Just "-" -> pure    $ Just stdout
     Just f   -> fmap Just $ openFile f WriteMode
 
   currentJob <- newEmptyMVar
@@ -115,14 +115,14 @@ setup Config{..} callback = do
   ctx        <- mfix (\ctx -> do
       itid <- forkIO (handleCommands ctx)
       otid <- forkIO (handleOutput ctx)
-      return $ Context (Just phandle) commandW outputR logH callback itid otid currentJob finished nextToken jobs
+      pure $ Context (Just phandle) commandW outputR logH callback itid otid currentJob finished nextToken jobs
     )
-  return ctx
+  pure ctx
   where
   asHandles (f1, f2) = do
     h1 <- fdToHandle f1
     h2 <- fdToHandle f2
-    return (h1, h2)
+    pure (h1, h2)
 
 setup ConfigTCP{..} callback = do
   addr <- head <$> getAddrInfo Nothing (Just confTCPHost) (Just $ show confTCPPort)
@@ -134,8 +134,8 @@ setup ConfigTCP{..} callback = do
 
   mapM_ (`hSetBuffering` LineBuffering) [commandW, outputR]
   logH <- case confTCPLogfile of
-    Nothing  -> return    $ Nothing
-    Just "-" -> return    $ Just stdout
+    Nothing  -> pure    $ Nothing
+    Just "-" -> pure    $ Just stdout
     Just f   -> fmap Just $ openFile f WriteMode
 
   currentJob <- newEmptyMVar
@@ -145,28 +145,28 @@ setup ConfigTCP{..} callback = do
   ctx        <- mfix (\ctx -> do
       itid <- forkIO (handleCommands ctx)
       otid <- forkIO (handleOutput ctx)
-      return $ Context Nothing commandW outputR logH callback itid otid currentJob finished nextToken jobs
+      pure $ Context Nothing commandW outputR logH callback itid otid currentJob finished nextToken jobs
     )
-  return ctx
+  pure ctx
 
 kill :: Context -> IO ()
 kill ctx = do
-  maybe (return ()) terminateProcess (ctxProcess ctx)
+  maybe (pure ()) terminateProcess (ctxProcess ctx)
   mapM_ (killThread . ($ ctx)) [ctxCommandThread, ctxOutputThread]
   case ctxLog ctx of
-    Nothing -> return ()
+    Nothing -> pure ()
     Just handle ->
       if handle /= stdout
         then hClose handle
-        else return ()
+        else pure ()
 
--- | returns Just pid or Nothing if process has already exited
+-- | pures Just pid or Nothing if process has already exited
 getPid :: ProcessHandle -> IO (Maybe PHANDLE)
 getPid ph = withProcessHandle ph go
   where
     go ph_ = case ph_ of
-               OpenHandle x   -> return $ Just x
-               _              -> return Nothing
+               OpenHandle x   -> pure $ Just x
+               _              -> pure Nothing
 
 shutdown :: Context -> IO () -- {{{1
 -- | Shut down the GDB instance and all resources associated with the 'Context'.
@@ -175,24 +175,24 @@ shutdown ctx = do
   replicateM_ 2 (takeMVar (ctxFinished ctx))
   interrupt ctx
   writeCommand ctx C.gdb_exit 0
-  maybe (return ()) (void . waitForProcess) (ctxProcess ctx)
+  maybe (pure ()) (void . waitForProcess) (ctxProcess ctx)
   putMVar (ctxFinished ctx) ()
   case ctxLog ctx of
-    Nothing -> return ()
+    Nothing -> pure ()
     Just handle ->
       if handle /= stdout
         then hClose handle
-        else return ()
+        else pure ()
 
 -- | Send SIGINT to GDB process
 interrupt :: Context -> IO ()
 interrupt ctx = do
   case ctxProcess ctx of
-    Nothing -> return ()
+    Nothing -> pure ()
     Just proc -> do
       pid <- getPid proc
       case pid of
-        Nothing -> return ()
+        Nothing -> pure ()
         Just p  -> signalProcess sigINT p
 
 send_command :: Context -> R.Command -> IO R.Response -- {{{1
@@ -204,7 +204,7 @@ send_command ctx command = checkShutdown >> sendCommand >>= receiveResponse
     checkShutdown = do
       finished <- tryTakeMVar (ctxFinished ctx)
       case finished of
-        Nothing -> return ()
+        Nothing -> pure ()
         Just () -> error "context has already been shut down"
 
     sendCommand = atomically $ do
@@ -212,7 +212,7 @@ send_command ctx command = checkShutdown >> sendCommand >>= receiveResponse
       writeTVar (ctxNextToken ctx) (if token == maxBound then 0 else token + 1)
       response <- newEmptyTMVar
       writeTChan (ctxJobs ctx) $ Job command response token
-      return response
+      pure response
 
     receiveResponse = atomically . takeTMVar
 
@@ -229,7 +229,7 @@ handleOutput ctx = handleKill ctx $ do
   output  <- readOutput ctx
   _ <- callBack ctx output
   case R.output_response output of
-    Nothing -> return ()
+    Nothing -> pure ()
     Just response -> do
       maybJob <- tryTakeMVar (ctxCurrentJob ctx)
       case maybJob of
@@ -241,7 +241,7 @@ handleOutput ctx = handleKill ctx $ do
   handleOutput ctx
 
 callBack :: Context -> R.Output -> IO ()
-callBack ctx output = forkIO go >> return ()
+callBack ctx output = forkIO go >> pure ()
   where
     go =
       let
@@ -287,7 +287,7 @@ readOutput ctx = do
   _ <- hWaitForInput (ctxOutputPipe ctx) (-1)
   str <- hGetLine (ctxOutputPipe ctx)
   debugLog ctx False str
-  return (R.parse_output str)
+  pure (R.parse_output str)
 
 debugLog :: Context -> Bool -> String -> IO () -- {{{2
 debugLog ctx io text =
@@ -296,5 +296,5 @@ debugLog ctx io text =
     line = ((unlines . map (prefix++) . lines) text)
   in
   case (ctxLog ctx) of
-    Nothing -> return ()
+    Nothing -> pure ()
     Just h -> hPutStr h line >> hFlush h

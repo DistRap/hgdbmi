@@ -236,7 +236,7 @@ p_output = do
   rr   <- optionMaybe p_resultRecord
   oob' <- many        p_outOfBandRecord
   optional $ string "(gdb) "
-  return $ Output (oob ++ oob') rr
+  pure $ Output (oob ++ oob') rr
 
 p_resultRecord :: Parser ResultRecord -- {{{3
 p_resultRecord =
@@ -244,14 +244,14 @@ p_resultRecord =
 
 p_outOfBandRecord :: Parser OutOfBandRecord -- {{{3
 p_outOfBandRecord =
-       try (p_asyncRecord  >>= return . OOBAsyncRecord)
-  <|>      (p_streamRecord >>= return . OOBStreamRecord)
+       try (p_asyncRecord  >>= pure . OOBAsyncRecord)
+  <|>      (p_streamRecord >>= pure . OOBStreamRecord)
 
 p_asyncRecord :: Parser AsyncRecord -- {{{3
 p_asyncRecord =
-      try (p_execAsyncOutput   >>= return . ARExecAsyncOutput)
-  <|> try (p_statusAsyncOutput >>= return . ARStatusAsyncOutput)
-  <|>     (p_notifyAsyncOutput >>= return . ARNotifyAsyncOutput)
+      try (p_execAsyncOutput   >>= pure . ARExecAsyncOutput)
+  <|> try (p_statusAsyncOutput >>= pure . ARStatusAsyncOutput)
+  <|>     (p_notifyAsyncOutput >>= pure . ARNotifyAsyncOutput)
 
 p_execAsyncOutput :: Parser ExecAsyncOutput -- {{{3
 p_execAsyncOutput =
@@ -271,31 +271,31 @@ p_asyncOutput =
 
 p_resultClass :: Parser ResultClass -- {{{3
 p_resultClass =
-      try (string "done"      >> return RCDone)
-  <|> try (string "running"   >> return RCRunning)
-  <|> try (string "connected" >> return RCConnected)
-  <|> try (string "error"     >> return RCError)
-  <|>     (string "exit"      >> return RCExit)
+      try (string "done"      >> pure RCDone)
+  <|> try (string "running"   >> pure RCRunning)
+  <|> try (string "connected" >> pure RCConnected)
+  <|> try (string "error"     >> pure RCError)
+  <|>     (string "exit"      >> pure RCExit)
 
 p_asyncClass :: Parser AsyncClass -- {{{3
 p_asyncClass = asum $ map try $ [
-    string "breakpoint-created"   >> return ACBreakpointCreated
-  , string "breakpoint-deleted"   >> return ACBreakpointDeleted
-  , string "breakpoint-modified"  >> return ACBreakpointModified
-  , string "cmd-param-changed"    >> return ACParamChanged
-  , string "running"              >> return ACRunning
-  , string "record-started"       >> return ACRecordStarted
-  , string "record-stopped"       >> return ACRecordStopped
-  , string "stopped"              >> return ACStop
-  , string "thread-group-added"   >> return ACThreadGroupAdded
-  , string "thread-group-started" >> return ACThreadGroupStarted
-  , string "thread-created"       >> return ACThreadCreated
-  , string "thread-selected"      >> return ACThreadSelected
-  , string "thread-exited"        >> return ACThreadExited
-  , string "thread-group-exited"  >> return ACThreadGroupExited
-  , string "memory-changed"       >> return ACMemoryChanged
-  , string "library-loaded"       >> return ACLibraryLoaded
-  , string "download"             >> return ACDownload
+    string "breakpoint-created"   >> pure ACBreakpointCreated
+  , string "breakpoint-deleted"   >> pure ACBreakpointDeleted
+  , string "breakpoint-modified"  >> pure ACBreakpointModified
+  , string "cmd-param-changed"    >> pure ACParamChanged
+  , string "running"              >> pure ACRunning
+  , string "record-started"       >> pure ACRecordStarted
+  , string "record-stopped"       >> pure ACRecordStopped
+  , string "stopped"              >> pure ACStop
+  , string "thread-group-added"   >> pure ACThreadGroupAdded
+  , string "thread-group-started" >> pure ACThreadGroupStarted
+  , string "thread-created"       >> pure ACThreadCreated
+  , string "thread-selected"      >> pure ACThreadSelected
+  , string "thread-exited"        >> pure ACThreadExited
+  , string "thread-group-exited"  >> pure ACThreadGroupExited
+  , string "memory-changed"       >> pure ACMemoryChanged
+  , string "library-loaded"       >> pure ACLibraryLoaded
+  , string "download"             >> pure ACDownload
   ]
 
 p_result :: Parser Result -- {{{3
@@ -310,9 +310,9 @@ p_variable = many1 (letter <|> digit <|> oneOf "_-")
 
 p_value :: Parser Value -- {{{3
 p_value =
-      (p_const >>= return . VConst)
-  <|> (p_tuple >>= return . VTuple)
-  <|> (p_list  >>= return . VList)
+      (p_const >>= pure . VConst)
+  <|> (p_tuple >>= pure . VTuple)
+  <|> (p_list  >>= pure . VList)
 
 p_const :: Parser Const -- {{{3
 p_const = p_cString
@@ -320,51 +320,51 @@ p_const = p_cString
 p_tuple :: Parser Tuple -- {{{3
 p_tuple = try p_emptyTuple <|> p_filledTuple
   where
-    p_emptyTuple = string "{}" >> return (Tuple [])
+    p_emptyTuple = string "{}" >> pure (Tuple [])
     p_filledTuple = do
       _ <- char '{'
       first <- p_result
       rest <- many (char ',' >> p_result)
       _ <- char '}'
-      return $ Tuple (first:rest)
+      pure $ Tuple (first:rest)
 
 p_list :: Parser List -- {{{3
 p_list = try p_emptyList <|> try p_valueList <|> p_resultList
   where
-    p_emptyList = string "[]" >> return EmptyList
+    p_emptyList = string "[]" >> pure EmptyList
     p_valueList = do
       _ <- char '['
       first <- p_value
       rest <- many (char ',' >> p_value)
       _ <- char ']'
-      return $ ValueList (first:rest)
+      pure $ ValueList (first:rest)
 
     p_resultList = do
       _ <- char '['
       first <- p_result
       rest <- many (char ',' >> p_result)
       _ <- char ']'
-      return $ ResultList (first:rest)
+      pure $ ResultList (first:rest)
 
 p_streamRecord :: Parser StreamRecord -- {{{3
 p_streamRecord = do
   sr <- anyStreamRecord
   _ <- optional newline -- the documentation does not specifiy this newline, but this is what GDB is doing
-  return sr
+  pure sr
   where
     anyStreamRecord =
-          (p_consoleStreamOutput >>= return . SRConsoleStreamOutput)
-      <|> (p_targetStreamOutput  >>= return . SRTargetStreamOutput)
-      <|> (p_logStreamOutput     >>= return . SRLogStreamOutput)
+          (p_consoleStreamOutput >>= pure . SRConsoleStreamOutput)
+      <|> (p_targetStreamOutput  >>= pure . SRTargetStreamOutput)
+      <|> (p_logStreamOutput     >>= pure . SRLogStreamOutput)
 
 p_consoleStreamOutput :: Parser ConsoleStreamOutput -- {{{3
-p_consoleStreamOutput = char '~' >> p_cString >>= return . ConsoleStreamOutput
+p_consoleStreamOutput = char '~' >> p_cString >>= pure . ConsoleStreamOutput
 
 p_targetStreamOutput :: Parser TargetStreamOutput -- {{{3
-p_targetStreamOutput = char '@' >> p_cString >>= return . TargetStreamOutput
+p_targetStreamOutput = char '@' >> p_cString >>= pure . TargetStreamOutput
 
 p_logStreamOutput :: Parser LogStreamOutput -- {{{3
-p_logStreamOutput = char '&' >> p_cString >>= return . LogStreamOutput
+p_logStreamOutput = char '&' >> p_cString >>= pure . LogStreamOutput
 
 p_cString :: Parser CString -- {{{3
 p_cString = between (char '"') (char '"') (many p_cchar)
@@ -375,15 +375,15 @@ p_cString = between (char '"') (char '"') (many p_cchar)
       _ <- char '\\'
       c <- anyChar
       case c of
-        '\\' -> return '\\'
-        'n' -> return '\n'
-        'r' -> return '\r'
-        't' -> return '\t'
-        '"' -> return '"'
+        '\\' -> pure '\\'
+        'n' -> pure '\n'
+        'r' -> pure '\r'
+        't' -> pure '\t'
+        '"' -> pure '"'
         _ -> fail $ "unknown backslash escape: " ++ show c
 
 p_token :: Parser Token -- {{{3
-p_token = many1 digit >>= return . read
+p_token = many1 digit >>= pure . read
 
 -- simplification {{{1
 data Response -- {{{2

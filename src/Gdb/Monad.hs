@@ -59,12 +59,12 @@ withGDB config act = do
       <$> newTBQueue 1000
       <*> newTBQueue 1000
       <*> newTBQueue 1000
-    return (stops, streamQ, notifQ, userQ)
+    pure (stops, streamQ, notifQ, userQ)
   ctx <- liftIO $ G.setup config (callbackQueues stops streamQ notifQ)
 
   x <- flip runReaderT (GDBContext ctx stops userQ) act
   liftIO $ G.shutdown ctx
-  return $ Right x
+  pure $ Right x
 
 -- | `withGdb` variant that prints data from queues, installs `sigintHandler`
 -- and prints all logs at the end
@@ -93,8 +93,8 @@ withGDB' config act = liftIO $ do
     $ flip runReaderT (GDBContext ctx stops userQ) act
 
   res <- case x of
-    Left e -> return $ Left $ show (e :: SomeException)
-    Right r -> return $ Right r
+    Left e -> pure $ Left $ show (e :: SomeException)
+    Right r -> pure $ Right r
 
   G.shutdown ctx
 
@@ -104,7 +104,7 @@ withGDB' config act = liftIO $ do
   pstream $ concat logs
   -- we ignore async notifications (events) for now
   --print notif
-  return res
+  pure res
   where
     pstream' (R.Stream _ s) = putStr s
     pstream = mapM_ pstream'
@@ -127,13 +127,13 @@ command ctx rc x = do
               (show (R.respClass resp))
               ((show . S.response_error . R.respResults) resp)
   when (R.respClass resp /= rc) (error msg)
-  return (R.respResults resp)
+  pure (R.respResults resp)
 
--- |Send GDB-MI command and return raw response
+-- |Send GDB-MI command and pure raw response
 commandRaw :: G.Context -> R.Command -> IO R.Response
 commandRaw ctx x = do
   resp <- G.send_command ctx x
-  return resp
+  pure resp
 
 -- |Send GDB command but don't fail if response differs from
 -- expected response `rc`, print error message instead
@@ -188,7 +188,7 @@ waitStop = do
 
   stops <- liftIO $ atomically $ do
     takeTMVar tmvar
-  return stops
+  pure stops
 
 -- | Did we stop due to breakpoint
 isBreak :: S.Stopped -> Bool
@@ -204,7 +204,7 @@ waitBreak :: (MonadIO m) => GdbT m S.Stopped
 waitBreak = do
   stops <- waitStop
   if any isBreak stops
-    then return $ head $ filter isBreak stops -- return ()
+    then pure $ head $ filter isBreak stops
     else waitBreak
 
 -- | Perform action `act` when breakpoint is hit and continue
@@ -253,7 +253,7 @@ eval expr = do
 readMem :: (MonadIO m, Show a, Num b) => a -> Int -> GdbT m (Maybe b)
 readMem addr size = do
   res <- cmd R.RCDone $ C.data_read_memory_bytes Nothing (show addr) size
-  return $ S.response_read_memory_bytes res
+  pure $ S.response_read_memory_bytes res
 
 data Programmer =
     BMP String
@@ -273,7 +273,7 @@ extRemote prog = do
   cli "set mem inaccessible-by-default off"
   cmd' R.RCDone $ C.gdb_set "mem inaccessible-by-default off"
   _ <- cmd R.RCDone $ C.target_attach (Left 1)
-  return ()
+  pure ()
 
 -- | Load file and its symbols
 file :: (MonadIO m) => FilePath -> GdbT m ()

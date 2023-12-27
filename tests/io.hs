@@ -72,7 +72,7 @@ setup = do
       putStrLn sout
       putStrLn serr
       error $ printf "failed to execute gcc: %s" (show ec')
-    ExitSuccess -> return ()
+    ExitSuccess -> pure ()
 
 command :: G.Context -> R.ResultClass -> R.Command -> IO [R.Result]
 command ctx rc cmd = do
@@ -82,11 +82,11 @@ command ctx rc cmd = do
               (show (R.respClass resp))
               ((show . S.response_error . R.respResults) resp)
   when (R.respClass resp /= rc) (error msg)
-  return (R.respResults resp)
+  pure (R.respResults resp)
 
 assert :: (Eq a, Show a) => String -> a -> a -> IO ()
 assert what x y = if (x == y)
-  then return ()
+  then pure ()
   else error $ printf "assertion failed: %s: %s vs. %s" what (show x) (show y)
 
 test ::  IO ()
@@ -108,7 +108,7 @@ test = do
       let value        = Data.Maybe.fromMaybe (error "No reponse_break") $ S.response_data_evaluate_expression value'
       assert "value of i" value (show counter)
       _               <- cmd R.RCRunning $ C.exec_continue
-      return ()
+      pure ()
     )
   G.shutdown ctx
   readFile "gdb.log" >>= putStr
@@ -120,7 +120,7 @@ withTemporaryDirectory f = bracket acquire release inbetween
       tmpdir <- createTempDirectory "/tmp" "hgdbmi-test"
       curdir <- getCurrentDirectory
       setCurrentDirectory tmpdir
-      return (curdir, tmpdir)
+      pure (curdir, tmpdir)
 
     release (curdir, tmpdir) = do
       setCurrentDirectory curdir
