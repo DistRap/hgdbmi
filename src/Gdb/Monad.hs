@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Gdb.Monad
@@ -49,8 +50,10 @@ module Gdb.Monad
   , memAddr
   -- * Read memory
   , readMem
+  , readMem32
   -- * Write memory
   , writeMem
+  , writeMem32
   -- * Programmer
   , Programmer(..)
   , extRemote
@@ -645,6 +648,13 @@ readMem addr = do
           (finiteBitSize (0 :: a) `div` 4)
   pure $ Gdbmi.Semantics.response_read_memory_bytes res
 
+-- | Shorthand for reading @Word32@ sized segment
+readMem32
+  :: MonadGDB m
+  => MemAddress -- ^ Memory address to read from
+  -> m (Maybe Word32)
+readMem32 = readMem @Word32
+
 -- | Write multiple memory segments to @MemAddress@
 writeMem
   :: forall a m
@@ -673,6 +683,14 @@ writeMem addr contents = do
         ++ "X"
         )
         x
+
+-- | Shorthand for writing @Word32@ sized segment
+writeMem32
+  :: MonadGDB m
+  => MemAddress -- ^ Memory address to write to
+  -> [Word32] -- ^ Data to write
+  -> m ()
+writeMem32 = writeMem @Word32
 
 -- * Programmer
 
