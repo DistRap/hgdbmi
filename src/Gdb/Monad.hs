@@ -49,6 +49,8 @@ module Gdb.Monad
   , memAddr
   -- * Read memory
   , readMem
+  -- * Write memory
+  , writeMem
   -- * Programmer
   , Programmer(..)
   , extRemote
@@ -84,6 +86,7 @@ import Gdbmi.Representation
 import Gdbmi.IO (Callback(..))
 import Gdbmi.Semantics (Breakpoint(..), Stopped, StopReason(..))
 import System.Posix.Signals (Handler(Catch))
+import Text.Printf (PrintfArg)
 
 import qualified Control.Concurrent
 import qualified Control.Concurrent.Async
@@ -641,6 +644,35 @@ readMem addr = do
           (show $ unMemAddress addr)
           (finiteBitSize (0 :: a) `div` 4)
   pure $ Gdbmi.Semantics.response_read_memory_bytes res
+
+-- | Write multiple memory segments to @MemAddress@
+writeMem
+  :: forall a m
+   . ( MonadGDB m
+     , FiniteBits a
+     , Integral a
+     , PrintfArg a
+     )
+  => MemAddress -- ^ Memory address to write to
+  -> [a] -- ^ Data to write
+  -> m ()
+writeMem addr contents = do
+  cmd'
+    RCDone
+    $ Gdbmi.Commands.data_write_memory_bytes
+        (show $ unMemAddress addr)
+        (concatMap (Gdbmi.Semantics.toBigEndian . showHex) contents)
+  where
+    -- | Format number using hexadecimal notation
+    -- padded according to its bit size
+    showHex :: (PrintfArg t, FiniteBits t) => t -> String
+    showHex x =
+      Text.Printf.printf
+        ("%0"
+        ++ (show $ Data.Bits.finiteBitSize x `div` 4)
+        ++ "X"
+        )
+        x
 
 -- * Programmer
 

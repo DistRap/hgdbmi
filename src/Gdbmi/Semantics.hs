@@ -22,7 +22,8 @@ module Gdbmi.Semantics
   -- | Please consult the GDB manual for details on the returned responses.
   Breakpoint(..), BreakpointType, BreakpointDisp(..), BkptNumber,
   Stack(..), Frame(..), Arg(..),
-  Stopped(..), StopReason(..)
+  Stopped(..), StopReason(..),
+  toBigEndian
 ) where
 
 -- import {{{1
