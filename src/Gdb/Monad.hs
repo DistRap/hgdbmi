@@ -2,6 +2,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Gdb.Monad
@@ -42,6 +44,9 @@ module Gdb.Monad
   , isBreakHit
   -- * Evaluate expression
   , eval
+  -- * MemAddress
+  , MemAddress(..)
+  , memAddr
   -- * Read memory
   , readMem
   -- * Programmer
@@ -62,7 +67,9 @@ import Control.Monad.Trans (MonadTrans, lift)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import Control.Monad.Trans.State (StateT)
+import Data.Bits (FiniteBits(..))
 import Data.Default.Class (Default(def))
+import Data.Word (Word32)
 import Gdbmi.Commands (Medium)
 import Gdbmi.IO (Config(..), Context)
 import Gdbmi.Representation
@@ -603,24 +610,36 @@ eval expr = do
             "response_data_evaluate_expression"
             res
 
+-- * MemAddress
+
+newtype MemAddress = MemAddress
+  { unMemAddress :: Word32 }
+  deriving (Eq, Ord, Show, Num)
+
+-- | Shorthand constructor
+memAddr :: Word32 -> MemAddress
+memAddr = MemAddress
+
 -- * Read memory
 
+-- | Read single memory segment from @MemAddress@
+-- Segment size depends on Word type.
 readMem
-  :: ( MonadGDB m
-     , Show a
-     , Num b
+  :: forall a m
+   . ( MonadGDB m
+     , FiniteBits a
+     , Integral a
      )
-  => a
-  -> Int
-  -> m (Maybe b)
-readMem addr size = do
+  => MemAddress -- ^ Memory address to read from
+  -> m (Maybe a)
+readMem addr = do
   res <-
     cmd
       RCDone
       $ Gdbmi.Commands.data_read_memory_bytes
           Nothing
-          (show addr)
-          size
+          (show $ unMemAddress addr)
+          (finiteBitSize (0 :: a) `div` 4)
   pure $ Gdbmi.Semantics.response_read_memory_bytes res
 
 -- * Programmer
